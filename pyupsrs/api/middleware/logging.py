@@ -14,7 +14,7 @@ class LoggingMiddleware:
         """Initialize the logging middleware."""
         self.logger = logging.getLogger("pyupsrs.api")
 
-    def process_request(self, req: falcon.Request, resp: falcon.Response) -> None:
+    async def process_request(self, req: falcon.Request, resp: falcon.Response) -> None:
         """
         Process the request before routing it.
 
@@ -26,7 +26,7 @@ class LoggingMiddleware:
         req.context.start_time = time.time()
         self.logger.info(f"Request: {req.method} {req.path}")
 
-    def process_response(
+    async def process_response(
         self, req: falcon.Request, resp: falcon.Response, resource: Optional[object], req_succeeded: bool
     ) -> None:
         """

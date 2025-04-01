@@ -6,7 +6,7 @@ import falcon
 class AuthMiddleware:
     """Middleware for handling authentication."""
 
-    def process_request(self, req: falcon.Request, resp: falcon.Response) -> None:
+    async def process_request(self, req: falcon.Request, resp: falcon.Response) -> None:
         """
         Process the request before routing it.
 

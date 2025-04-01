@@ -6,7 +6,7 @@ import falcon
 class SubscriptionsResource:
     """Resource for handling collections of UPS subscriptions."""
 
-    def on_get(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
+    async def on_get(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """
         Handle GET requests to retrieve a collection of subscriptions.
 
@@ -21,7 +21,7 @@ class SubscriptionsResource:
         resp.content_type = "application/dicom+json"
         resp.status = falcon.HTTP_200
 
-    def on_post(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
+    async def on_post(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """
         Handle POST requests to create a new subscription.
 
@@ -39,7 +39,7 @@ class SubscriptionsResource:
 class SubscriptionResource:
     """Resource for handling individual UPS subscriptions."""
 
-    def on_delete(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str, subscriber_uid: str) -> None:
+    async def on_delete(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str, subscriber_uid: str) -> None:
         """
         Handle DELETE requests to unsubscribe.
 

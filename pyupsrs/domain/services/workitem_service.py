@@ -1,5 +1,8 @@
 """Business logic for handling UPS workitems."""
 
+import logging
+import sys
+
 from pyupsrs.domain.models.ups import WorkItem, WorkItemStatus
 from pyupsrs.storage.repositories.workitem_repository import WorkItemRepository
 from pyupsrs.websocket.notification_service import NotificationService
@@ -24,6 +27,13 @@ class WorkItemService:
         self.workitem_repository = workitem_repository
         self.notification_service = notification_service
 
+        self.logger = logging.getLogger("pyupsrs.domain.services.workitem_service.WorkItemService")
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s")
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.DEBUG)
+
     def create_workitem(self, workitem: WorkItem) -> WorkItem:
         """
         Create a new workitem.
@@ -39,7 +49,10 @@ class WorkItemService:
         created_workitem = self.workitem_repository.create(workitem)
 
         # Send notification
-        self.notification_service.notify_creation(created_workitem)
+        if self.notification_service:
+            self.notification_service.notify_creation(created_workitem)
+        else:
+            self.logger.warning("Notification Service not injected, no notifications will be sent")
 
         return created_workitem
 
