@@ -1,0 +1,1 @@
+"""pyupsrs/api/resources package."""

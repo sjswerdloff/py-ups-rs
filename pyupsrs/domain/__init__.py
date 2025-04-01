@@ -1,0 +1,1 @@
+"""pyupsrs/domain package."""
