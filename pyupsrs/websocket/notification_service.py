@@ -29,6 +29,8 @@ class NotificationService:
             workitem: The created workitem.
 
         """
+        # TODO: Notification Message needs to be in UPS Event format
+        # currently this is just a stand-in
         message = {
             "event_type": "creation",
             "workitem_uid": workitem.uid,
@@ -44,6 +46,8 @@ class NotificationService:
             workitem: The updated workitem.
 
         """
+        # TODO: Notification Message needs to be in UPS Event format
+        # currently this is just a stand-in
         message = {
             "event_type": "status_change",
             "workitem_uid": workitem.uid,

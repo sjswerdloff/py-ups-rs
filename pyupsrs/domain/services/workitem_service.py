@@ -56,30 +56,55 @@ class WorkItemService:
 
         return created_workitem
 
-    def update_workitem_status(self, uid: str, new_status: WorkItemStatus) -> tuple[WorkItem, bool]:
+    def update_workitem_status(self, uid: str, new_status: WorkItemStatus, transaction_uid: str) -> tuple[WorkItem, bool]:
         """
         Update a workitem's status.
 
         Args:
             uid: The UID of the workitem.
             new_status: The new status.
+            transaction_uid: The UID that acts as a lock on a workitem that is already IN PROGRESS
 
         Returns:
             A tuple of (updated workitem, success).
 
         """
-        # Retrieve the workitem
-        workitem = self.workitem_repository.get_by_uid(uid)
-        if not workitem:
-            return None, False
+        try:
+            # Retrieve the workitem
+            workitem = self.workitem_repository.get_by_uid(uid)
+            if not isinstance(workitem, WorkItem):
+                workitem = WorkItem(ds=workitem)
 
-        # Update status
-        workitem.update_status(new_status)
+            if workitem is None:
+                return None, False
 
-        # Save changes
-        updated_workitem = self.workitem_repository.update(workitem)
+            current_status = None
+            if hasattr(workitem.ds, "ProcedureStepState"):
+                current_status = workitem.ds.ProcedureStepState
+            else:
+                return workitem, False
 
-        # Send notification
-        self.notification_service.notify_status_change(updated_workitem)
+            if current_status not in ["SCHEDULED"] and (not transaction_uid or (workitem.transaction_uid != transaction_uid)):
+                return workitem, False
 
+            if current_status in ["COMPLETED", "CANCELED"]:
+                return workitem, False
+
+            logging.warning(f"Attempting to update status from {str(current_status)} to {str(new_status)}")
+            # Update status
+            workitem.update_procedure_step_status(new_status)
+            if new_status == WorkItemStatus.IN_PROGRESS:
+                workitem.transaction_uid = transaction_uid
+
+            # Save changes
+            updated_workitem = self.workitem_repository.update(workitem)
+
+            # Send notification
+            if self.notification_service:
+                self.notification_service.notify_status_change(updated_workitem)
+            else:
+                logging.warning("Notification Service not initialized, no notifications will be sent.")
+        except Exception as e:
+            logging.error(f"Problem while updating workitem status: {e}")
+            raise e
         return updated_workitem, True

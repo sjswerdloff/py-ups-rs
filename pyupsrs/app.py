@@ -50,7 +50,7 @@ def create_app() -> App:
 
     # Register routes
     app.add_route("/workitems", WorkItemsResource())
-    app.add_route("/workitems/{workitem_uid}", WorkItemResource())
+    app.add_route("/workitems/{workitem_uid}/state", WorkItemResource())
     app.add_route("/workitems/{workitem_uid}/subscribers", SubscriptionsResource())
     app.add_route("/workitems/{workitem_uid}/subscribers/{subscriber_uid}", SubscriptionResource())
 

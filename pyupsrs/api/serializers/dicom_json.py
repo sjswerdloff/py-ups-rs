@@ -19,7 +19,7 @@ def serialize_workitem(workitem: WorkItem) -> dict[str, Any]:
         The serialized DICOM+JSON representation.
 
     """
-    return workitem.to_json_dict()
+    return workitem.ds.to_json_dict()
 
 
 def deserialize_workitem(dicom_json: dict[str, Any]) -> WorkItem:
@@ -33,8 +33,5 @@ def deserialize_workitem(dicom_json: dict[str, Any]) -> WorkItem:
         The deserialized WorkItem.
 
     """
-    workitem = dataset.Dataset.from_json(dicom_json)
-    workitem.uid = workitem.SOPInstanceUID
-    workitem.status = workitem.ProcedureStepState
-    workitem.created_at = datetime.now()
-    return workitem
+    ds = dataset.Dataset.from_json(dicom_json)
+    return WorkItem(ds=ds)

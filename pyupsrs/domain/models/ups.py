@@ -18,16 +18,48 @@ class WorkItemStatus(Enum):
     COMPLETED = "COMPLETED"
     CANCELED = "CANCELED"
 
+    @classmethod
+    def from_string(cls, status_string: str) -> "WorkItemStatus":
+        """
+        Convert a string to the corresponding enum value.
+
+        Args:
+            status_string: The string to convert
+
+        Returns:
+            The enum value
+
+        Raises:
+            ValueError: If the string doesn't match any enum value
+
+        """
+        for status in cls:
+            if status.value == status_string:
+                return status
+        raise ValueError(f"No enum value matches '{status_string}'")
+
 
 @dataclass
-class WorkItem(Dataset):
-    """A UPS workitem."""
+class WorkItem:
+    """A UPS workitem container.  Has a Dataset."""
 
     status: WorkItemStatus = WorkItemStatus.SCHEDULED  # Procedure Step State
     # These aren't part of the UPS definition, but they could prove to be useful
     # for logging and tracking purposes
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
+    transaction_uid: str = None
+    ds = Dataset()
+
+    def __init__(self, ds: Dataset = None) -> None:
+        """
+        Build WorkItem from existing Dataset.
+
+        Args:
+            ds (Dataset, optional): A pydicom dataset representing a UPS. Defaults to None.
+
+        """
+        self.ds = ds
 
     # Get the rest using pydicom.dataset.Dataset
     #
@@ -50,7 +82,7 @@ class WorkItem(Dataset):
             str: The UID value
 
         """
-        return str(self.get("SOPInstanceUID", ""))
+        return str(self.ds.get("SOPInstanceUID", ""))
 
     @uid.setter
     def uid(self, value: str) -> None:
@@ -63,11 +95,11 @@ class WorkItem(Dataset):
         """
         _uid = UID(value)
         if _uid.is_valid:
-            self.SOPInstanceUID = value
+            self.ds.SOPInstanceUID = value
         else:
             raise InvalidDicomError("Not a valid UID: {_uid}")
 
-    def update_status(self, new_status: WorkItemStatus) -> None:
+    def update_procedure_step_status(self, new_status: WorkItemStatus) -> None:
         """
         Update the status of the workitem.
 
@@ -76,7 +108,7 @@ class WorkItem(Dataset):
 
         """
         self.status = new_status
-        self.ProcedureStepState = new_status
+        self.ds.ProcedureStepState = new_status.value
         self.updated_at = datetime.now()
 
 

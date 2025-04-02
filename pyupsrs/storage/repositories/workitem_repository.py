@@ -1,8 +1,11 @@
 """Repository for accessing UPS workitems."""
 
+from copy import deepcopy
 from typing import Optional
 
 from pyupsrs.domain.models.ups import WorkItem
+
+local_store: dict[str, WorkItem] = {}
 
 
 class WorkItemRepository:
@@ -30,6 +33,7 @@ class WorkItemRepository:
 
         """
         # TODO: Implement database persistence
+        local_store[workitem.uid] = workitem
         return workitem
 
     def get_by_uid(self, uid: str) -> Optional[WorkItem]:
@@ -44,7 +48,7 @@ class WorkItemRepository:
 
         """
         # TODO: Implement database retrieval
-        return None
+        return local_store.get(uid)
 
     def update(self, workitem: WorkItem) -> WorkItem:
         """
@@ -58,7 +62,7 @@ class WorkItemRepository:
 
         """
         # TODO: Implement database update
-        return workitem
+        return local_store[workitem.uid].ds.update(workitem.ds)
 
     def delete(self, uid: str) -> bool:
         """
@@ -72,6 +76,7 @@ class WorkItemRepository:
 
         """
         # TODO: Implement database deletion
+        del local_store[uid]
         return True
 
     def get_all(self) -> list[WorkItem]:
@@ -83,4 +88,4 @@ class WorkItemRepository:
 
         """
         # TODO: Implement database retrieval
-        return []
+        return deepcopy(local_store)
