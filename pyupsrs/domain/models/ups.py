@@ -47,7 +47,7 @@ class WorkItem:
     # These aren't part of the UPS definition, but they could prove to be useful
     # for logging and tracking purposes
     created_at: datetime = field(default_factory=datetime.now)
-    updated_at: Optional[datetime] = None
+    updated_at: datetime = created_at
     transaction_uid: str = None
     ds = Dataset()
 

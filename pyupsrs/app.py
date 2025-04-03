@@ -1,5 +1,6 @@
 """Main application entry point for the pyupsrs server."""
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -14,8 +15,9 @@ from uvicorn.main import main as uvicorn_main
 from pyupsrs.api.middleware.auth import AuthMiddleware
 from pyupsrs.api.middleware.logging import LoggingMiddleware
 from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionsResource
-from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource
+from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
 from pyupsrs.config import get_config
+from pyupsrs.utils.class_logger import configure_logging
 
 
 def create_app() -> App:
@@ -49,10 +51,13 @@ def create_app() -> App:
     )
 
     # Register routes
-    app.add_route("/workitems", WorkItemsResource())
-    app.add_route("/workitems/{workitem_uid}/state", WorkItemResource())
-    app.add_route("/workitems/{workitem_uid}/subscribers", SubscriptionsResource())
     app.add_route("/workitems/{workitem_uid}/subscribers/{subscriber_uid}", SubscriptionResource())
+    app.add_route("/workitems/{workitem_uid}/subscribers", SubscriptionsResource())
+    app.add_route("/workitems/{workitem_uid}/state", WorkItemStateResource())
+    app.add_route("/workitems/{workitem_uid}", WorkItemResource())
+    app.add_route("/workitems", WorkItemsResource())
+
+    # app.add_route("/workitems/{workitem_uid}/{transaction_uid}", WorkItemResource())
 
     return app
 
@@ -83,7 +88,7 @@ def main(
     """
     # Get base configuration
     config = get_config()
-
+    configure_logging(level=logging.getLevelNamesMapping()[str(config.log_level).upper()])
     # Update with command-line arguments if provided
     if database_uri is not None:
         os.environ["PYUPSRS_DATABASE_URI"] = database_uri

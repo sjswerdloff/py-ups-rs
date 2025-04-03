@@ -19,7 +19,6 @@ class NotificationService:
 
         """
         self.connection_manager = connection_manager
-        self.logger = logging.getLogger("pyupsrs.websocket")
 
     def notify_creation(self, workitem: WorkItem) -> None:
         """

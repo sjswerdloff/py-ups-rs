@@ -5,10 +5,11 @@ import sys
 
 from pyupsrs.domain.models.ups import WorkItem, WorkItemStatus
 from pyupsrs.storage.repositories.workitem_repository import WorkItemRepository
+from pyupsrs.utils.class_logger import LoggerMixin
 from pyupsrs.websocket.notification_service import NotificationService
 
 
-class WorkItemService:
+class WorkItemService(LoggerMixin):
     """Service for managing UPS workitems."""
 
     def __init__(
@@ -26,13 +27,6 @@ class WorkItemService:
         """
         self.workitem_repository = workitem_repository
         self.notification_service = notification_service
-
-        self.logger = logging.getLogger("pyupsrs.domain.services.workitem_service.WorkItemService")
-        handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s")
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.DEBUG)
 
     def create_workitem(self, workitem: WorkItem) -> WorkItem:
         """
@@ -90,7 +84,7 @@ class WorkItemService:
             if current_status in ["COMPLETED", "CANCELED"]:
                 return workitem, False
 
-            logging.warning(f"Attempting to update status from {str(current_status)} to {str(new_status)}")
+            self.logger.warning(f"Attempting to update status from {str(current_status)} to {str(new_status)}")
             # Update status
             workitem.update_procedure_step_status(new_status)
             if new_status == WorkItemStatus.IN_PROGRESS:
@@ -103,8 +97,8 @@ class WorkItemService:
             if self.notification_service:
                 self.notification_service.notify_status_change(updated_workitem)
             else:
-                logging.warning("Notification Service not initialized, no notifications will be sent.")
+                self.logger.warning("Notification Service not initialized, no notifications will be sent.")
         except Exception as e:
-            logging.error(f"Problem while updating workitem status: {e}")
+            self.logger.error(f"Problem while updating workitem status: {e}")
             raise e
         return updated_workitem, True
