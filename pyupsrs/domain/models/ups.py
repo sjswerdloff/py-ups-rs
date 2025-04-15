@@ -9,6 +9,10 @@ from pydicom.dataset import Dataset
 from pydicom.errors import InvalidDicomError
 from pydicom.uid import UID
 
+GLOBAL_SUBSCRIPTION_UID = "1.2.840.10008.5.1.4.34.5"
+
+FILTERED_SUBSCRIPTION_UID = "1.2.840.10008.5.1.4.34.5.1"
+
 
 class WorkItemStatus(Enum):
     """Status values for UPS workitems."""
@@ -115,12 +119,14 @@ class WorkItem:
         self.updated_at = datetime.now()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Subscription:
     """A subscription to a UPS workitem."""
 
-    workitem_uid: str
-    subscriber_uid: str
+    workitem_uid: str  # might be GLOBAL or FILTERED Subscription (well known) UID
+    ae_title: str
     created_at: datetime = field(default_factory=datetime.now)
     deletion_lock: bool = False
     contact_uri: Optional[str] = None
+    filter: Dataset | None = None
+    suspended: bool = False  # This implies that to suspend, a new subscription has to be created and the old one deleted
