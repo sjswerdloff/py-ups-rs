@@ -70,18 +70,22 @@ class WorkItemService(LoggerMixin):
                 workitem = WorkItem(ds=workitem)
 
             if workitem is None:
+                self.logger.warning("No workitem found")
                 return None, False
 
             current_status = None
             if hasattr(workitem.ds, "ProcedureStepState"):
                 current_status = workitem.ds.ProcedureStepState
             else:
+                self.logger.warning(f"ProcedureStepState not present in stored workitem {uid}, something went wrong when it was created?")
                 return workitem, False
 
             if current_status not in ["SCHEDULED"] and (not transaction_uid or (workitem.transaction_uid != transaction_uid)):
+                self.logger.warning(f"Workitem {uid} was not in SCHEDULED state but transaction UID was not present or wrong value")
                 return workitem, False
 
             if current_status in ["COMPLETED", "CANCELED"]:
+                self.logger.warning(f"Workitem {uid} was already COMPLETED or CANCELED")
                 return workitem, False
 
             self.logger.warning(f"Attempting to update status from {str(current_status)} to {str(new_status)}")
@@ -102,3 +106,26 @@ class WorkItemService(LoggerMixin):
             self.logger.error(f"Problem while updating workitem status: {e}")
             raise e
         return updated_workitem, True
+
+
+    def cancel_workitem(self, workitem: WorkItem) -> WorkItem:
+        """
+        Create a new workitem.
+
+        Args:
+            workitem: The workitem to create.
+
+        Returns:
+            The created workitem.
+
+        """
+        # Save to repository
+        created_workitem = self.workitem_repository.create(workitem)
+
+        # Send notification
+        if self.notification_service:
+            self.notification_service.notify_creation(created_workitem)
+        else:
+            self.logger.warning("Notification Service not injected, no notifications will be sent")
+
+        return created_workitem

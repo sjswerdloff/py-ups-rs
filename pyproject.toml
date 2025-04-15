@@ -7,27 +7,34 @@ name = "pyupsrs"
 version = "0.1.0"
 description = "A DICOMWeb UPS-RS server implementation using Falcon"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "Stuart Swerdloff", email = "sjswerdloff@gmail.com"},
 ]
 dependencies = [
-    "falcon>=3.1.0",
-    "uvicorn>=0.22.0",
-    "websockets>=11.0.0",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pre-commit>=4.2.0",
-    "autoflake>=2.3.1",
-    "pydicom>=2.4.4",
+    "falcon>=4.0.2",
+    "uvicorn>=0.34.0",
+    "websockets>=15.0.1",
+    "pydicom>=3.0.1",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.0.272",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
+    "ruff>=0.11.4",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=6.1.1",
+    "pytest-httpx>=0.29.0",
+    "mypy>=1.9.0",
+    "pre-commit>=4.2.0",
+    "autoflake>=2.3.1",
+]
+
+docs = [
+    "sphinx>=8.3.0",
+    "sphinx-rtd-theme>=3.0.2",
+    "sphinxcontrib-napoleon>=0.7",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -79,3 +86,22 @@ known-first-party = ["pyupsrs"]
 quote-style = "double"
 line-ending = "auto"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_no_return = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false

@@ -47,9 +47,9 @@ class WorkItem:
     # These aren't part of the UPS definition, but they could prove to be useful
     # for logging and tracking purposes
     created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = created_at
-    transaction_uid: str = None
-    ds = Dataset()
+    updated_at: datetime = field(default_factory=datetime.now)
+    transaction_uid: str = field(default=None)
+    ds: Dataset = field(default_factory=Dataset)
 
     def __init__(self, ds: Dataset = None) -> None:
         """
@@ -60,6 +60,9 @@ class WorkItem:
 
         """
         self.ds = ds
+        self.created_at = datetime.now()
+        self.updated_at = self.created_at
+        self.transaction_uid = None
 
     # Get the rest using pydicom.dataset.Dataset
     #

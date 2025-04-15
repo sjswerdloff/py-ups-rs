@@ -3,6 +3,7 @@
 import logging
 
 import websockets
+from websockets import ServerConnection
 
 
 class ConnectionManager:
@@ -10,12 +11,12 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         """Initialize the ConnectionManager."""
-        self.connections: dict[str, websockets.WebSocketServerProtocol] = {}
+        self.connections: dict[str, websockets.ServerConnection] = {}
         self.subscriptions: dict[str, set[str]] = {}  # workitem_uid -> set of subscriber_ids
         self.subscriber_to_workitems: dict[str, set[str]] = {}  # subscriber_id -> set of workitem_uids
         self.logger = logging.getLogger("pyupsrs.websocket")
 
-    async def handle_connection(self, websocket: websockets.WebSocketServerProtocol, subscriber_id: str) -> None:
+    async def handle_connection(self, websocket: websockets.ServerConnection, subscriber_id: str) -> None:
         """
         Handle a new WebSocket connection.
 

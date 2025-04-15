@@ -3,18 +3,20 @@
 import logging
 import os
 import sys
-from pathlib import Path
+
+# from pathlib import Path
 from typing import Optional
 
 import click
 import falcon.asgi
-import uvicorn
+
+# import uvicorn
 from falcon.asgi import App
 from uvicorn.main import main as uvicorn_main
 
 from pyupsrs.api.middleware.auth import AuthMiddleware
 from pyupsrs.api.middleware.logging import LoggingMiddleware
-from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionsResource
+from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionSuspendResource
 from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
 from pyupsrs.config import get_config
 from pyupsrs.utils.class_logger import configure_logging
@@ -51,9 +53,14 @@ def create_app() -> App:
     )
 
     # Register routes
-    app.add_route("/workitems/{workitem_uid}/subscribers/{subscriber_uid}", SubscriptionResource())
-    app.add_route("/workitems/{workitem_uid}/subscribers", SubscriptionsResource())
+    # the same variable name has to be used in routes that are children of the same parent.
+    # so workitem_uid for subscribers is necessary, and needs to be interpreted as
+    # a resource ID (well known UIDs for Global and Filtered )
+    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5/subscribers/{aetitle}/suspend", SubscriptionSuspendResource())
+    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5.1/subscribers/{aetitle}/suspend", SubscriptionSuspendResource())
+    app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}", SubscriptionResource())
     app.add_route("/workitems/{workitem_uid}/state", WorkItemStateResource())
+    app.add_route("/workitems/{workitem_uid}/cancelrequest", WorkItemResource())
     app.add_route("/workitems/{workitem_uid}", WorkItemResource())
     app.add_route("/workitems", WorkItemsResource())
 
