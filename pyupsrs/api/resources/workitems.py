@@ -1,13 +1,13 @@
 """Falcon resources for UPS workitems."""
 
 import json
+import traceback
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
+
 import falcon
 from falcon.asgi import BoundedStream
-
-from pydicom import Dataset, DataElement, datadict
+from pydicom import DataElement, Dataset, datadict
 
 from pyupsrs.api.serializers.dicom_json import deserialize_workitem
 from pyupsrs.config import Config
@@ -15,6 +15,7 @@ from pyupsrs.domain.models.ups import WorkItemStatus
 from pyupsrs.domain.services import workitem_service as svc_workitem_service
 from pyupsrs.storage.repositories import workitem_repository
 from pyupsrs.utils.class_logger import LoggerMixin
+from pyupsrs.websocket import notification_service as svc_notification_service
 
 UPS_WARNING_MODIFICATIONS = "Warning: 299 {service}: The Workitem was updated with modifications."
 UPS_WARNING_URI_UNCLAIMED_WORKITEM = "Warning: 299 {service}: The target URI did not reference a claimed Workitem."
@@ -31,7 +32,8 @@ UPS_WARNING_STATE_IS_ALREADY_COMPLETED = "Warning: 299 {service}: The UPS is alr
 UPS_WARNING_STATE_IS_ALREADY_CANCELED = "Warning: 299 {service}: The UPS is already in the requested state of CANCELED."
 
 
-def get_base_uri(req: falcon.Request):
+def get_base_uri(req: falcon.Request) -> str:
+    """Get Base URI from the request."""
     # Extract scheme (http or https)
     scheme = req.scheme
     print(f"Scheme: {scheme}")
@@ -46,10 +48,10 @@ def get_base_uri(req: falcon.Request):
     print(f"Root Path: {root_path}")
     # Get the prefix part of the path (this depends on how your WSGI server is configured)
     # If you're using a reverse proxy or your app is mounted at a specific path
-    prefix = req.prefix if hasattr(req, 'prefix') else ''
+    prefix = req.prefix if hasattr(req, "prefix") else ""
     print(f"Prefix: {prefix}")
     # If prefix starts with http:// or https://, extract only the path portion
-    if prefix and (prefix.startswith('http://') or prefix.startswith('https://')):
+    if prefix and (prefix.startswith("http://") or prefix.startswith("https://")):
         return prefix
 
     # Construct the base URI, not sure what the app path is.
@@ -57,8 +59,9 @@ def get_base_uri(req: falcon.Request):
 
 
 def serialise_list_of_ds_to_json(dataset_list: list[Dataset]) -> str:
+    """Serialise of list of Dataset to JSON."""
     list_of_json_ds = [ds.to_json() for ds in dataset_list]
-    return "[" + ','.join(list_of_json_ds) + "]"
+    return "[" + ",".join(list_of_json_ds) + "]"
 
 
 # Custom media handler for application/dicom+json
@@ -139,8 +142,10 @@ class WorkItemsResource(LoggerMixin):
         self.workitem_service = workitem_service
         if not self.workitem_service:
             workitem_crud = workitem_repository.WorkItemRepository(database_uri=Config.database_uri)
+            notification_communication_manager = svc_notification_service.ConnectionManager()
+            notification_backend = svc_notification_service.NotificationService(notification_communication_manager)
             self.workitem_service = svc_workitem_service.WorkItemService(
-                workitem_repository=workitem_crud, notification_service=None
+                workitem_repository=workitem_crud, notification_service=notification_backend
             )
 
     async def on_get(self, req: falcon.Request, resp: falcon.Response) -> None:
@@ -174,23 +179,17 @@ class WorkItemsResource(LoggerMixin):
                 try:
                     tag = int(key, base=16)
 
-                    query_ds.add(DataElement(tag=tag,
-                                             VR=datadict.dictionary_VR(tag),
-                                             value=value))
+                    query_ds.add(DataElement(tag=tag, VR=datadict.dictionary_VR(tag), value=value))
                 except ValueError:
                     try:
                         keyword = key
-                        query_ds.add(DataElement(tag=keyword,
-                                                 VR=datadict.dictionary_VR(keyword),
-                                                 value=value))
+                        query_ds.add(DataElement(tag=keyword, VR=datadict.dictionary_VR(keyword), value=value))
                     except ValueError:
                         self.logger.error(f"Matching element had invalid tag or keyword: {key}")
 
-            workitem_list = self.workitem_service.workitem_repository.get_filtered(match=query_ds,
-                                                                                   include_field=include_field,
-                                                                                   fuzzy_matching=fuzzy_matching,
-                                                                                   offset=offset,
-                                                                                   limit=limit)
+            workitem_list = self.workitem_service.workitem_repository.get_filtered(
+                match=query_ds, include_field=include_field, fuzzy_matching=fuzzy_matching, offset=offset, limit=limit
+            )
 
         resp.content_type = "application/dicom+json"
         if workitem_list and len(workitem_list) > 0 and workitem_list[0] is not None and workitem_list[0].ds is not None:
@@ -244,6 +243,8 @@ class WorkItemsResource(LoggerMixin):
                 resp.text = resp_media
 
         except Exception as e:
+            # Get a detailed traceback for debugging on the server side
+            print(traceback.format_exc())
             # Log the exception
             raise falcon.HTTPInternalServerError(title="Error processing request", description=str(e)) from e
 
@@ -336,7 +337,9 @@ class WorkItemResource(LoggerMixin):
             self.logger.info(f"Received Transaction UID {transaction_uid} as a parameter, this is an update transaction")
             if workitem.status != WorkItemStatus.SCHEDULED and workitem.transaction_uid != transaction_uid:
                 resp.status = falcon.HTTP_400
-                resp.append_header("Warning", UPS_WARNING_INCONSISTENT_WITH_STATE.format(service=get_base_uri(req=req)))  # The required message per 11.6.3.2
+                resp.append_header(
+                    "Warning", UPS_WARNING_INCONSISTENT_WITH_STATE.format(service=get_base_uri(req=req))
+                )  # The required message per 11.6.3.2
                 resp.append_header(
                     "Warning", UPS_WARNING_MISSING_TRANSACTION_UID.format(service=get_base_uri(req=req))
                 )  # A more accurate message that also fulfills 11.7.3.2
@@ -347,8 +350,12 @@ class WorkItemResource(LoggerMixin):
         else:
             resp.status = falcon.HTTP_400
 
-            resp.append_header("Warning", UPS_WARNING_INCONSISTENT_WITH_STATE.format(service=get_base_uri(req=req)))  # The required message per 11.6.3.2
-            resp.append_header("Warning", UPS_WARNING_MISSING_TRANSACTION_UID.format(service=get_base_uri(req=req)))  # A more accurate message fulfilling 11.7.3.2
+            resp.append_header(
+                "Warning", UPS_WARNING_INCONSISTENT_WITH_STATE.format(service=get_base_uri(req=req))
+            )  # The required message per 11.6.3.2
+            resp.append_header(
+                "Warning", UPS_WARNING_MISSING_TRANSACTION_UID.format(service=get_base_uri(req=req))
+            )  # A more accurate message fulfilling 11.7.3.2
 
         if resp.status == falcon.HTTP_200:
             workitem_update.uid = workitem_uid
@@ -366,6 +373,7 @@ class WorkItemResource(LoggerMixin):
         Args:
             req: The HTTP request.
             resp: The HTTP response.
+            workitem_uid: The UID of the workitem.
 
         """
         try:
@@ -393,9 +401,9 @@ class WorkItemResource(LoggerMixin):
                 resp.status = falcon.HTTP_404
             else:
                 # Try to cancel it
-                _, canceled = self.workitem_service.update_workitem_status(workitem_uid,
-                                                                           new_status=WorkItemStatus.CANCELED,
-                                                                           transaction_uid=None)
+                _, canceled = self.workitem_service.update_workitem_status(
+                    workitem_uid, new_status=WorkItemStatus.CANCELED, transaction_uid=None
+                )
                 if canceled:
                     # update to include whatever reasons and notification information
                     # TODO: check within update to see if the update contains cancellation request information and
@@ -404,10 +412,12 @@ class WorkItemResource(LoggerMixin):
                     self.workitem_service.workitem_repository.update(cancel_workitem)
 
                 resp.status = falcon.HTTP_202 if canceled else falcon.HTTP_409
-                        # resp_media = json.dumps(workitem_response)
-                        # resp.text = resp_media
+                # resp_media = json.dumps(workitem_response)
+                # resp.text = resp_media
 
         except Exception as e:
+            # Get a detailed traceback for debugging on the server side
+            print(traceback.format_exc())
             # Log the exception
             raise falcon.HTTPInternalServerError(title="Error processing request", description=str(e)) from e
 
@@ -456,6 +466,7 @@ class WorkItemStateResource(LoggerMixin):
 
         """
         new_state: WorkItemStatus = WorkItemStatus.IN_PROGRESS
+        base_uri = get_base_uri(req=req)
         # Manually read and parse the request body
         body = await req.stream.read()
         if not body:
@@ -490,7 +501,9 @@ class WorkItemStateResource(LoggerMixin):
             msg = "Warning: 299 {service}: The submitted request is inconsistent with the current state of the Workitem."
             full_msg = "Warning: 299 {service}: The Transaction UID is missing."
             resp.append_header("Warning", msg.format(service=get_base_uri(req=req)))  # The required message per 11.6.3.2
-            resp.append_header("Warning", full_msg.format(service=get_base_uri(req=req)))  # A more accurate message that also fulfills 11.7.3.2 if state transaction
+            resp.append_header(
+                "Warning", full_msg.format(service=get_base_uri(req=req))
+            )  # A more accurate message that also fulfills 11.7.3.2 if state transaction
             return
 
         new_state = WorkItemStatus.from_string(procedure_step_state)  # throws an exception if procedure_step_state not valid
@@ -501,12 +514,11 @@ class WorkItemStateResource(LoggerMixin):
         elif workitem.status in [WorkItemStatus.COMPLETED, WorkItemStatus.CANCELED]:
             if new_state == workitem.status:
                 resp.status = falcon.HTTP_410
-                msg = f"Warning: 299 {get_base_uri(req=req)}: The UPS is already in the requested state of {workitem.status.value}."
-                self.logger.error(msg)
+                msg = f"Warning: 299 {base_uri}: The UPS is already in the requested state of {workitem.status.value}."
             else:
                 resp.status = falcon.HTTP_409
-                msg = f"Warning: 299 {get_base_uri(req=req)}: The submitted request is inconsistent with the state of the UPS Instance."
-                self.logger.error(msg)
+                msg = f"Warning: 299 {base_uri}: The submitted request is inconsistent with the state of the UPS Instance."
+            self.logger.error(msg)
 
             resp.append_header("Warning", msg)
         elif workitem.status in [WorkItemStatus.IN_PROGRESS] and new_state not in [
@@ -516,17 +528,17 @@ class WorkItemStateResource(LoggerMixin):
             resp.status = falcon.HTTP_409
             msg = "Warning: 299 {service}: The submitted request is inconsistent with the state of the UPS Instance."
             self.logger.error(msg)
-            resp.append_header("Warning", msg.format(service=get_base_uri(req=req)))
+            resp.append_header("Warning", msg.format(service=base_uri))
         elif not transaction_uid:
             resp.status = falcon.HTTP_400
             msg = "Warning: 299 {service}: The Transaction UID is missing."
             self.logger.error(msg)
-            resp.append_header("Warning", msg.format(service=get_base_uri(req=req)))
+            resp.append_header("Warning", msg.format(service=base_uri))
         elif new_state != WorkItemStatus.IN_PROGRESS and transaction_uid != workitem.transaction_uid:
             resp.status = falcon.HTTP_400
             msg = "Warning: 299 {service}: The Transaction UID is incorrect."
             self.logger.error(msg)
-            resp.append_header("Warning", msg.format(service=get_base_uri(req=req)))
+            resp.append_header("Warning", msg.format(service=base_uri))
         else:
             workitem, update_succeeded = self.workitem_service.update_workitem_status(
                 workitem_uid, new_status=new_state, transaction_uid=transaction_uid

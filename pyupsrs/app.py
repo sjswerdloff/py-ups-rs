@@ -5,8 +5,6 @@ import os
 import sys
 
 # from pathlib import Path
-from typing import Optional
-
 import click
 import falcon.asgi
 
@@ -17,8 +15,10 @@ from uvicorn.main import main as uvicorn_main
 from pyupsrs.api.middleware.auth import AuthMiddleware
 from pyupsrs.api.middleware.logging import LoggingMiddleware
 from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionSuspendResource
+from pyupsrs.api.resources.websocket_resource import WebSocketResource
 from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
 from pyupsrs.config import get_config
+from pyupsrs.domain.services.service_provider import ServiceProvider
 from pyupsrs.utils.class_logger import configure_logging
 
 
@@ -39,6 +39,9 @@ def create_app() -> App:
     # Create the Falcon application
     app = falcon.asgi.App(middleware=middleware)
 
+    # Get shared services
+    service_provider = ServiceProvider.get_instance()
+
     # Register media handlers
 
     app.req_options.media_handlers.update(
@@ -52,19 +55,28 @@ def create_app() -> App:
         }
     )
 
+    # Initialize resources with shared services
+    subscription_resource = SubscriptionResource(subscription_service=service_provider.subscription_service)
+    subscription_suspend_resource = SubscriptionSuspendResource(subscription_service=service_provider.subscription_service)
+    workitem_resource = WorkItemResource(workitem_service=service_provider.workitem_service)
+    workitem_state_resource = WorkItemStateResource(workitem_service=service_provider.workitem_service)
+    workitems_resource = WorkItemsResource(workitem_service=service_provider.workitem_service)
+    websocket_resource = WebSocketResource(connection_manager=service_provider.connection_manager)
+
     # Register routes
     # the same variable name has to be used in routes that are children of the same parent.
     # so workitem_uid for subscribers is necessary, and needs to be interpreted as
     # a resource ID (well known UIDs for Global and Filtered )
-    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5/subscribers/{aetitle}/suspend", SubscriptionSuspendResource())
-    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5.1/subscribers/{aetitle}/suspend", SubscriptionSuspendResource())
-    app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}", SubscriptionResource())
-    app.add_route("/workitems/{workitem_uid}/state", WorkItemStateResource())
-    app.add_route("/workitems/{workitem_uid}/cancelrequest", WorkItemResource())
-    app.add_route("/workitems/{workitem_uid}", WorkItemResource())
-    app.add_route("/workitems", WorkItemsResource())
+    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5/subscribers/{aetitle}/suspend", subscription_suspend_resource)
+    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5.1/subscribers/{aetitle}/suspend", subscription_suspend_resource)
+    app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}", subscription_resource)
+    app.add_route("/workitems/{workitem_uid}/state", workitem_state_resource)
+    app.add_route("/workitems/{workitem_uid}/cancelrequest", workitem_resource)
+    app.add_route("/workitems/{workitem_uid}", workitem_resource)
+    app.add_route("/workitems", workitems_resource)
 
-    # app.add_route("/workitems/{workitem_uid}/{transaction_uid}", WorkItemResource())
+    # Register WebSocket route
+    app.add_route("/ws/subscribers/{subscriber_id}", websocket_resource)
 
     return app
 
@@ -83,8 +95,8 @@ def create_app() -> App:
 )
 @click.argument("uvicorn_args", nargs=-1, type=click.UNPROCESSED)
 def main(
-    database_uri: Optional[str],
-    auth: Optional[bool],
+    database_uri: str | None,
+    auth: bool | None,
     uvicorn_args: tuple[str, ...],
 ) -> None:
     """

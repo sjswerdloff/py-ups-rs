@@ -32,7 +32,7 @@ dev = [
 ]
 
 docs = [
-    "sphinx>=8.3.0",
+    "sphinx>=8.0",
     "sphinx-rtd-theme>=3.0.2",
     "sphinxcontrib-napoleon>=0.7",
 ]

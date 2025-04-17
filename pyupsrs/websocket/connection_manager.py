@@ -3,7 +3,6 @@
 import logging
 
 import websockets
-from websockets import ServerConnection
 
 
 class ConnectionManager:
@@ -106,6 +105,7 @@ class ConnectionManager:
 
         try:
             await websocket.send(message)
+            self.logger.warning(f"Sent message to {subscriber_id}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to send message to {subscriber_id}: {e}")
