@@ -56,6 +56,7 @@ class SubscriptionService(LoggerMixin):
                 filter=subscription_to_suspend.filter,
                 suspended=True,
             )
+            ServiceProvider.get_instance().connection_manager.unsubscribe(ae_title, workitem_uid)  # equivalent to suspend
             self.delete_subscription(subscription_to_suspend.workitem_uid, subscription_to_suspend.ae_title)
             self.create_subscription(suspended_subscription)
             return True

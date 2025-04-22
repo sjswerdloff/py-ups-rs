@@ -6,12 +6,14 @@ from datetime import datetime
 from typing import Any
 
 import falcon
+import falcon.request
+import falcon.response
 from falcon.asgi import BoundedStream
 from pydicom import DataElement, Dataset, datadict
 
 from pyupsrs.api.serializers.dicom_json import deserialize_workitem
 from pyupsrs.config import Config
-from pyupsrs.domain.models.ups import WorkItemStatus
+from pyupsrs.domain.models.ups import WorkItem, WorkItemStatus
 from pyupsrs.domain.services import workitem_service as svc_workitem_service
 from pyupsrs.storage.repositories import workitem_repository
 from pyupsrs.utils.class_logger import LoggerMixin
@@ -188,7 +190,11 @@ class WorkItemsResource(LoggerMixin):
                         self.logger.error(f"Matching element had invalid tag or keyword: {key}")
 
             workitem_list = self.workitem_service.workitem_repository.get_filtered(
-                match=query_ds, include_field=include_field, fuzzy_matching=fuzzy_matching, offset=offset, limit=limit
+                match=query_ds,
+                include_field=include_field.split(","),
+                fuzzy_matching=fuzzy_matching,
+                offset=offset,
+                limit=limit,
             )
 
         resp.content_type = "application/dicom+json"
@@ -218,6 +224,7 @@ class WorkItemsResource(LoggerMixin):
         """
         try:
             # Manually read and parse the request body
+            base_uri = get_base_uri(req=req)
             body = await req.stream.read()
             if not body:
                 raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM JSON dataset is required")
@@ -234,7 +241,10 @@ class WorkItemsResource(LoggerMixin):
             resp.content_type = "application/dicom+json"
 
             if self.workitem_service.workitem_repository.get_by_uid(workitem.uid):
+                msg = f"Error: 299 {base_uri}: Can not create the workitem because the workitem UID: {workitem.uid} exists"
+                self.logger.error(msg)
                 resp.status = falcon.HTTP_409
+                resp.append_header("Warning", msg)
             else:
                 self.workitem_service.create_workitem(workitem=workitem)
                 workitem_response = {"00080018": {"Value": [workitem.ds.SOPInstanceUID], "vr": "UI"}}
@@ -289,6 +299,8 @@ class WorkItemResource(LoggerMixin):
             try:
                 json_response_text = workitem.ds.to_json()
             except Exception as e:
+                # Get a detailed traceback for debugging on the server side
+                print(traceback.format_exc())
                 print(f"Failed to serialise result as json string: {e}")
 
             resp.text = json_response_text
@@ -457,7 +469,7 @@ class WorkItemStateResource(LoggerMixin):
 
     async def on_put(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """
-        Handle PUT requests to update a workitem.
+        Handle PUT requests to update the status on a workitem.
 
         Args:
             req: The HTTP request.
@@ -493,21 +505,28 @@ class WorkItemStateResource(LoggerMixin):
             if "00081195" in change_state_request and "Value" in change_state_request["00081195"]:
                 transaction_uid = change_state_request["00081195"]["Value"][0]
 
-        if not procedure_step_state and not transaction_uid:
-            # This is probably an update transaction that didn't have a transaction UID
-            resp.status = falcon.HTTP_400
-            resp.content_type = "application/json"
-            # TODO: refactor to extract warning message strings as constants.
-            msg = "Warning: 299 {service}: The submitted request is inconsistent with the current state of the Workitem."
-            full_msg = "Warning: 299 {service}: The Transaction UID is missing."
-            resp.append_header("Warning", msg.format(service=get_base_uri(req=req)))  # The required message per 11.6.3.2
-            resp.append_header(
-                "Warning", full_msg.format(service=get_base_uri(req=req))
-            )  # A more accurate message that also fulfills 11.7.3.2 if state transaction
+        if self._is_missing_transaction_uid(req, resp, procedure_step_state, transaction_uid):
             return
 
         new_state = WorkItemStatus.from_string(procedure_step_state)  # throws an exception if procedure_step_state not valid
         workitem = self.workitem_service.workitem_repository.get_by_uid(workitem_uid)
+        if self._is_workitem_valid_for_update(resp, workitem_uid, new_state, base_uri, transaction_uid, workitem):
+            workitem, update_succeeded = self.workitem_service.update_workitem_status(
+                workitem_uid, new_status=new_state, transaction_uid=transaction_uid
+            )
+            resp.status = falcon.HTTP_200 if update_succeeded else falcon.HTTP_400
+
+        resp.content_type = "application/json"
+
+    def _is_workitem_valid_for_update(
+        self,
+        resp: falcon.response,
+        workitem_uid: str,
+        new_state: WorkItemStatus,
+        base_uri: str,
+        transaction_uid: str,
+        workitem: WorkItem | None,
+    ) -> bool:
         if workitem is None:
             resp.status = falcon.HTTP_404
             self.logger.error(f"No workitem found for {workitem_uid}")
@@ -519,30 +538,43 @@ class WorkItemStateResource(LoggerMixin):
                 resp.status = falcon.HTTP_409
                 msg = f"Warning: 299 {base_uri}: The submitted request is inconsistent with the state of the UPS Instance."
             self.logger.error(msg)
-
             resp.append_header("Warning", msg)
         elif workitem.status in [WorkItemStatus.IN_PROGRESS] and new_state not in [
             WorkItemStatus.COMPLETED,
             WorkItemStatus.CANCELED,
         ]:
+            msg = f"Warning: 299 {base_uri}: The submitted request is inconsistent with the state of the UPS Instance."
+            self.logger.error(msg)
             resp.status = falcon.HTTP_409
-            msg = "Warning: 299 {service}: The submitted request is inconsistent with the state of the UPS Instance."
-            self.logger.error(msg)
-            resp.append_header("Warning", msg.format(service=base_uri))
+            resp.append_header("Warning", msg)
         elif not transaction_uid:
-            resp.status = falcon.HTTP_400
-            msg = "Warning: 299 {service}: The Transaction UID is missing."
+            msg = f"Warning: 299 {base_uri}: The Transaction UID is missing."
             self.logger.error(msg)
-            resp.append_header("Warning", msg.format(service=base_uri))
+            resp.status = falcon.HTTP_400
+            resp.append_header("Warning", msg)
         elif new_state != WorkItemStatus.IN_PROGRESS and transaction_uid != workitem.transaction_uid:
-            resp.status = falcon.HTTP_400
-            msg = "Warning: 299 {service}: The Transaction UID is incorrect."
+            msg = f"Warning: 299 {base_uri}: The Transaction UID is incorrect."
             self.logger.error(msg)
-            resp.append_header("Warning", msg.format(service=base_uri))
+            resp.status = falcon.HTTP_400
+            resp.append_header("Warning", msg)
         else:
-            workitem, update_succeeded = self.workitem_service.update_workitem_status(
-                workitem_uid, new_status=new_state, transaction_uid=transaction_uid
-            )
-            resp.status = falcon.HTTP_200 if update_succeeded else falcon.HTTP_400
+            return True
 
-        resp.content_type = "application/json"
+        return False
+
+    def _is_missing_transaction_uid(
+        self, req: falcon.request, resp: falcon.response, procedure_step_state: str, transaction_uid: str
+    ) -> bool:
+        if not procedure_step_state and not transaction_uid:
+            # This is probably an update transaction that didn't have a transaction UID
+            resp.status = falcon.HTTP_400
+            resp.content_type = "application/json"
+            # TODO: refactor to extract warning message strings as constants.
+            msg = "Warning: 299 {service}: The submitted request is inconsistent with the current state of the Workitem."
+            full_msg = "Warning: 299 {service}: The Transaction UID is missing."
+            resp.append_header("Warning", msg.format(service=get_base_uri(req=req)))  # The required message per 11.6.3.2
+            resp.append_header(
+                "Warning", full_msg.format(service=get_base_uri(req=req))
+            )  # A more accurate message that also fulfills 11.7.3.2 if state transaction
+            return True
+        return False

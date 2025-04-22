@@ -67,6 +67,11 @@ class WorkItem:
         self.created_at = datetime.now()
         self.updated_at = self.created_at
         self.transaction_uid = None
+        # if self.ds:
+        #     if hasattr(ds, "AffectedSOPInstanceUID") and str(ds["AffectedSOPInstanceUID"]):
+        #         self.uid = str(ds["AffectedSOPInstanceUID"])
+        #     elif hasattr(ds, "SOPInstanceUID") and str(ds["SOPInstanceUID"]):
+        #         self.uid = str(ds["SOPInstanceUID"])
 
     # Get the rest using pydicom.dataset.Dataset
     #
@@ -89,7 +94,7 @@ class WorkItem:
             str: The UID value
 
         """
-        return str(self.ds.get("SOPInstanceUID", ""))
+        return self.ds.get("SOPInstanceUID", None) or self.ds.get("AffectedSOPInstanceUID", None)
 
     @uid.setter
     def uid(self, value: str) -> None:
@@ -103,6 +108,7 @@ class WorkItem:
         _uid = UID(value)
         if _uid.is_valid:
             self.ds.SOPInstanceUID = value
+            self.ds.AffectedSOPInstanceUID = value
         else:
             raise InvalidDicomError("Not a valid UID: {_uid}")
 

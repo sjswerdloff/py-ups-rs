@@ -4,8 +4,9 @@ import asyncio
 from copy import deepcopy
 from enum import Enum, StrEnum
 from functools import lru_cache
+from typing import Any
 
-from pydicom import Dataset, Sequence
+from pydicom import DataElement, Dataset, Sequence
 
 from pyupsrs.domain.models.ups import FILTERED_SUBSCRIPTION_UID, GLOBAL_SUBSCRIPTION_UID, WorkItem
 from pyupsrs.utils.class_logger import LoggerMixin
@@ -106,9 +107,8 @@ def _create_workitem_event_report(
     event_report.MessageID = get_next_message_id()
     event_report.EventTypeID = event_type_id.value
     event_report.InputReadinessState = input_readiness_state
-    event_report.ProcedureStepState = _PROCEDURE_STEP_STATES.get(
-        procedure_step_state, "SCHEDULED"
-    )  # might be better to raise an error?
+    defined_state: str = _PROCEDURE_STEP_STATES.get(procedure_step_state, "SCHEDULED")  # might be better to raise an error?
+    event_report.ProcedureStepState = defined_state
     if additional_dataset_info:
         event_report.update(additional_dataset_info)
     return event_report
@@ -133,6 +133,7 @@ def create_ups_state_report(
         Dataset: the UPS State Report in pydicom.Dataset format (use .to_json() for DICOMWeb)
 
     """
+    additional_dataset_info = None
     if reason_for_cancellation:
         additional_dataset_info = Dataset()
         additional_dataset_info["ReasonForCancellation"] = reason_for_cancellation
@@ -352,6 +353,10 @@ class NotificationService(LoggerMixin):
         event_report_message = create_ups_assigned_report(workitem.ds)
         self._send_notification(workitem.uid, event_report_message)
 
+    def _get_element_value_if_present(self, ds: Dataset, element_name: str) -> Any | None:  # noqa: ANN401
+        element: DataElement = ds.get(element_name)
+        return element.value if element is not None else None
+
     def notify_status_change(self, workitem: WorkItem) -> None:
         """
         Send a notification for workitem status change.
@@ -362,20 +367,23 @@ class NotificationService(LoggerMixin):
         """
         event_report_message = None
         affected_sop_instance_uid = workitem.uid
-        procedure_step_state = workitem.ds["ProcedureStepState"]
-        input_readiness_state = workitem.ds["InputReadinessState"]
-        reason_for_cancellation = workitem.ds.get("ReasonForCancellation")
-        procedure_step_progress = None
-        progress_description = None
-        contact_uri = None
-        contact_display_name = None
+        procedure_step_state: str = workitem.ds.ProcedureStepState
+        input_readiness_state: str = workitem.ds.InputReadinessState
+        reason_for_cancellation: str | None = self._get_element_value_if_present(workitem.ds, "ReasonForCancellation")
+
+        procedure_step_progress: int | None = None
+        progress_description: str | None = None
+        contact_uri: str | None = None
+        contact_display_name: str | None = None
         if procedure_step_progress_information_sequence := workitem.ds.get("ProcedureStepProgressInformationSequence"):
-            procedure_step_progress = procedure_step_progress_information_sequence[0]["ProcedureStepProgress"]
-            progress_description = procedure_step_progress_information_sequence[0]["ProcedureStepProgressDescription"]
+            seq_item: Dataset = procedure_step_progress_information_sequence[0]
+            procedure_step_progress = self._get_element_value_if_present(seq_item, "ProcedureStepProgress")
+            progress_description = self._get_element_value_if_present(seq_item, "ProcedureStepProgressDescription")
 
         if procedure_step_communications_uri_sequence := workitem.ds.get("ProcedureStepCommunicationsURISequence"):
-            contact_uri = procedure_step_communications_uri_sequence[0].get("ContactURI")
-            contact_display_name = procedure_step_communications_uri_sequence[0].get("ContactDisplayName")
+            seq_item: Dataset = procedure_step_communications_uri_sequence[0]
+            contact_uri = self._get_element_value_if_present(seq_item, "ContactURI")
+            contact_display_name = self._get_element_value_if_present(seq_item, "ContactDisplayName")
 
         if procedure_step_progress_information_sequence and procedure_step_state != "CANCELED":
             event_report_message = create_ups_progress_report(

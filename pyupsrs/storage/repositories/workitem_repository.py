@@ -2,12 +2,15 @@
 
 from copy import deepcopy
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydicom import Dataset, DataElement
+from pydicom import DataElement, Dataset
+from pydicom.datadict import keyword_for_tag, tag_for_keyword
+
 from pyupsrs.domain.models.ups import WorkItem
 from pyupsrs.utils.class_logger import LoggerMixin
 from pyupsrs.utils.dicom_query_matcher import query_datasets
+
 local_store: dict[str, WorkItem] = {}
 
 
@@ -23,7 +26,6 @@ class WorkItemRepository(LoggerMixin):
 
         """
         self.database_uri = database_uri
-
 
     def create(self, workitem: WorkItem) -> WorkItem:
         """
@@ -66,7 +68,7 @@ class WorkItemRepository(LoggerMixin):
 
         """
         if not workitem.uid:
-            print("No UID in change/udpate workitem")
+            print("No UID in change/update workitem")
         if stored_workitem := local_store[workitem.uid]:
             if change_ds := workitem.ds:
                 if stored_ds := stored_workitem.ds:
@@ -77,7 +79,8 @@ class WorkItemRepository(LoggerMixin):
                 print("No Change Dataset in update")
         else:
             print(f"Unable to find stored workitem with uid: {workitem.uid}")
-        return local_store[workitem.uid].ds.update(workitem.ds)
+
+        return local_store[workitem.uid]
 
     def delete(self, uid: str) -> bool:
         """
@@ -100,6 +103,7 @@ class WorkItemRepository(LoggerMixin):
 
         Args:
             uid: The UID of the workitem.
+            cancel_workitem: The workitem to cancel
 
         Returns:
             True if Canceled, False otherwise.
@@ -124,14 +128,16 @@ class WorkItemRepository(LoggerMixin):
         # TODO: Implement database retrieval
         return deepcopy(local_store)
 
-    def get_filtered(self,
-                     match: Dataset = None,
-                     include_field: list[str] = None,
-                     fuzzy_matching=None,
-                     offset: int | None = None,
-                     limit: int | None = None) -> list[WorkItem]:
+    def get_filtered(
+        self,
+        match: Dataset = None,
+        include_field: list[str] = None,
+        fuzzy_matching: Any = None,  # noqa: ANN401
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> list[WorkItem]:
         """
-        Returns filtered list of workitems
+        Filter list of workitems.
 
         Args:
             match (Dataset, optional): Exact matching query elements. Defaults to None.
@@ -142,6 +148,7 @@ class WorkItemRepository(LoggerMixin):
 
         Returns:
             list[WorkItem]: _description_
+
         """
         # TODO: Implement database retrieval
         # A broad interpretation.  An alternative would be to provide default match criteria.
@@ -165,10 +172,15 @@ class WorkItemRepository(LoggerMixin):
         matching_workitem_list = [local_store[workitem_uid] for workitem_uid in uid_list]
         copy_of_workitems = deepcopy(matching_workitem_list)  # we are potentially going to be removing a lot.
 
+        include_keywords = [keyword_for_tag(int(kw, 16)) if kw.isnumeric() else kw for kw in include_field]
+
+        self.logger.warning(f"Includefield as keywords {include_keywords}")
+
         if include_field and "all" not in include_field:
             self.logger.warning(f"includefield was specified and will restrict content returned: {include_field}")
             for workitem in copy_of_workitems:
                 for elem in workitem.ds:
-                    if elem.keyword not in include_field:
+                    # tag_as_string = f"{elem.tag:08x}"
+                    if elem.keyword not in include_keywords:  # and tag_as_string not in include_field:
                         del workitem.ds[elem.keyword]
         return copy_of_workitems[offset:limit]
