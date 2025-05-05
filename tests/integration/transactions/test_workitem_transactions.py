@@ -239,8 +239,8 @@ class TestWorkitemTransactions:
             dicom_headers (dict[str, Any]): _description_
 
         """
-        initial_scheduled_count = 0
-        initial_in_progress_count = 0
+        # initial_scheduled_count = 0
+        # initial_in_progress_count = 0
         #
         # Check to see what is already present.  Caching was taking place between tests.
         # until I added a reset of the internal repository of workitems
@@ -261,8 +261,8 @@ class TestWorkitemTransactions:
         #     assert workitems[0]["00741000"]["Value"][0] == "IN PROGRESS"
         # print(f"Initial IN PROGRESS Work Item Count = {initial_in_progress_count}")
 
-        assert initial_scheduled_count == 0
-        assert initial_in_progress_count == 0
+        # assert initial_scheduled_count == 0
+        # assert initial_in_progress_count == 0
         # Create a workitem, and make sure it comes back in a search
         result = create_workitem_helper(client, sample_ups_workitem)
         assert result.status_code == 201
@@ -270,7 +270,7 @@ class TestWorkitemTransactions:
         assert result.status_code == 200
         workitems = result.json
         print(workitems)
-        assert len(workitems) == 1 + initial_scheduled_count
+        assert len(workitems) == 1  # + initial_scheduled_count
         assert workitems[0]["00741000"]["Value"][0] == "SCHEDULED"
 
         # Add another work item, make sure both come back
@@ -279,17 +279,17 @@ class TestWorkitemTransactions:
         start_datetime: datetime = parse_dicom_date(second_work_item["00404005"]["Value"][0])
         start_datetime += timedelta(hours=1)
         second_work_item["00404005"]["Value"][0] = start_datetime.strftime("%Y%m%d%H%M%S")
-        if hasattr(second_work_item, "00404011") and hasattr(second_work_item["00404011"], "Value"):
-            end_datetime: datetime = parse_dicom_date(second_work_item["00404011"]["Value"][0])
-            end_datetime += timedelta(hours=1)
-            second_work_item["00404011"]["Value"][0] = end_datetime.strftime("%Y%m%d%H%M%S")
+        # if hasattr(second_work_item, "00404011") and hasattr(second_work_item["00404011"], "Value"):
+        #     end_datetime: datetime = parse_dicom_date(second_work_item["00404011"]["Value"][0])
+        #     end_datetime += timedelta(hours=1)
+        #     second_work_item["00404011"]["Value"][0] = end_datetime.strftime("%Y%m%d%H%M%S")
         result = create_workitem_helper(client, second_work_item)
         assert result.status_code == 201
         result = search_workitem_helper(client, match_parameters={"00741000": "SCHEDULED"}, no_cache=True)
         assert result.status_code == 200
         workitems = result.json
         print(workitems)
-        assert len(workitems) == 2 + initial_scheduled_count
+        assert len(workitems) == 2  # + initial_scheduled_count
 
         # search for something that shouldn't have a match
         result = search_workitem_helper(client, match_parameters={"00741000": "IN PROGRESS"}, no_cache=True)
