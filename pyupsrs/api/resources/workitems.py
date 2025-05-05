@@ -191,7 +191,7 @@ class WorkItemsResource(LoggerMixin):
 
             workitem_list = self.workitem_service.workitem_repository.get_filtered(
                 match=query_ds,
-                include_field=include_field.split(","),
+                include_field=include_field.split(",") if include_field else [],
                 fuzzy_matching=fuzzy_matching,
                 offset=offset,
                 limit=limit,

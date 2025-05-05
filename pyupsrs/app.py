@@ -37,6 +37,7 @@ def create_app() -> App:
         middleware.append(AuthMiddleware())
 
     # Create the Falcon application
+
     app = falcon.asgi.App(middleware=middleware)
 
     # Get shared services

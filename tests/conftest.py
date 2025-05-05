@@ -9,15 +9,17 @@ based on DICOM PS3.18 standard, running on Falcon 4.0.2 with ASGI/Uvicorn.
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 from falcon.asgi import App
-from httpx import AsyncClient
+from falcon.testing import TestClient
 from pydicom.uid import generate_uid
 
+from pyupsrs.storage.repositories.workitem_repository import local_store
 
-@pytest.fixture
+
+@pytest.fixture(scope="session", autouse=True)
 def falcon_app() -> App:
     """
     Create and return a Falcon ASGI application instance for DICOMWeb UPS-RS.
@@ -31,47 +33,120 @@ def falcon_app() -> App:
         and middleware configured.
 
     """
-    app = App()
-
-    # Add your UPS-RS resources here
-    # Example:
+    # Needs to be kept in sync with the actual api/app.py for the server.
+    # might be better to just launch the app via script?
+    from pyupsrs.api.middleware.auth import AuthMiddleware
+    from pyupsrs.api.middleware.logging import LoggingMiddleware
     from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionSuspendResource
-    from pyupsrs.api.resources.workitems import WorkItemResource, WorkItemsResource, WorkItemStateResource
+    from pyupsrs.api.resources.websocket_resource import WebSocketResource
+    from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
+    from pyupsrs.config import get_config
+    from pyupsrs.domain.services.service_provider import ServiceProvider
 
     # the same variable name has to be used in routes that are children of the same parent.
     # so workitem_uid for subscribers is necessary, and needs to be interpreted as
     # a resource ID (well known UIDs for Global and Filtered )
+    # Get configuration
+    config = get_config()
 
-    app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}/suspend", SubscriptionSuspendResource())
-    app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}", SubscriptionResource())
-    app.add_route("/workitems/{workitem_uid}/state", WorkItemStateResource())
-    app.add_route("/workitems/{workitem_uid}", WorkItemResource())
-    app.add_route("/workitems", WorkItemsResource())
+    # Initialize middleware
+    middleware = [
+        LoggingMiddleware(),
+    ]
+
+    # Add authentication middleware if enabled
+    if config.auth_enabled:
+        middleware.append(AuthMiddleware())
+
+    # Create the Falcon application
+    app = App(middleware=middleware)
+
+    # Get shared services
+    service_provider = ServiceProvider.get_instance()
+
+    # Register media handlers
+
+    app.req_options.media_handlers.update(
+        {
+            "application/dicom+json": DICOMJSONHandler(),
+        }
+    )
+    app.resp_options.media_handlers.update(
+        {
+            "application/dicom+json": DICOMJSONHandler(),
+        }
+    )
+
+    # Initialize resources with shared services
+    subscription_resource = SubscriptionResource(subscription_service=service_provider.subscription_service)
+    subscription_suspend_resource = SubscriptionSuspendResource(subscription_service=service_provider.subscription_service)
+    workitem_resource = WorkItemResource(workitem_service=service_provider.workitem_service)
+    workitem_state_resource = WorkItemStateResource(workitem_service=service_provider.workitem_service)
+    workitems_resource = WorkItemsResource(workitem_service=service_provider.workitem_service)
+    websocket_resource = WebSocketResource(connection_manager=service_provider.connection_manager)
+
+    # Register routes
+    # the same variable name has to be used in routes that are children of the same parent.
+    # so workitem_uid for subscribers is necessary, and needs to be interpreted as
+    # a resource ID (well known UIDs for Global and Filtered )
+    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5/subscribers/{aetitle}/suspend", subscription_suspend_resource)
+    app.add_route("/workitems/1.2.840.10008.5.1.4.34.5.1/subscribers/{aetitle}/suspend", subscription_suspend_resource)
+    app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}", subscription_resource)
+    app.add_route("/workitems/{workitem_uid}/state", workitem_state_resource)
+    app.add_route("/workitems/{workitem_uid}/cancelrequest", workitem_resource)
+    app.add_route("/workitems/{workitem_uid}", workitem_resource)
+    app.add_route("/workitems", workitems_resource)
+
+    # Register WebSocket route
+    app.add_route("/ws/subscribers/{subscriber_id}", websocket_resource)
+
     return app
 
 
-@pytest.fixture
-async def client(falcon_app: App) -> AsyncGenerator[AsyncClient, None]:
+@pytest.fixture(scope="function", autouse=True)
+def reset_workitem_repository() -> None:
+    """Reset the workitem repository in the service provider before each test."""
+    local_store.clear()
+
+
+# @pytest.fixture(scope="class", autouse=True)
+# async def async_client(falcon_app: App) -> AsyncGenerator[AsyncClient, None]:
+#     """
+#     Create a test client for DICOMWeb services using HTTPX.
+
+#     Args:
+#         falcon_app: The Falcon ASGI application instance to test.
+
+#     Yields:
+#         An HTTPX AsyncClient instance configured for the application.
+
+#     """
+#     # config = uvicorn_config()
+#     host = "localhost"  # config["host"]
+#     port = 8000  # config["port"]
+#     my_url = f"http://{host}:{port}"
+
+#     async with AsyncClient(base_url=my_url) as client:
+#         yield client
+
+
+@pytest.fixture(scope="function", autouse=False)
+def client(falcon_app: App) -> TestClient:
     """
-    Create a test client for DICOMWeb services using HTTPX.
+    Create a test client for DICOMWeb services using Falcon TestClient.
 
     Args:
         falcon_app: The Falcon ASGI application instance to test.
 
-    Yields:
-        An HTTPX AsyncClient instance configured for the application.
+    Returns:
+        A Falcon TestClient.
 
     """
     # config = uvicorn_config()
-    host = "localhost"  # config["host"]
-    port = 8000  # config["port"]
-    my_url = f"http://{host}:{port}"
-
-    async with AsyncClient(base_url=my_url) as client:
-        yield client
+    return TestClient(app=falcon_app)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=False)
 def dicom_auth_header() -> dict[str, str]:
     """
     Generate authentication headers for DICOMWeb services.
@@ -93,7 +168,7 @@ def dicom_auth_header() -> dict[str, str]:
     return {}
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def dicom_headers() -> dict[str, str]:
     """
     Create common DICOMWeb headers.
@@ -108,7 +183,7 @@ def dicom_headers() -> dict[str, str]:
     }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def dicom_multipart_headers() -> dict[str, str]:
     """
     Create multipart related DICOMWeb headers.
@@ -125,7 +200,22 @@ def dicom_multipart_headers() -> dict[str, str]:
     }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
+def sample_schedule_date_update() -> dict[str, Any]:
+    """
+    Create a sample schedule date update.
+
+    Returns:
+        A dictionary containing a scheduled start datetime and an expected completion datetime
+
+    """
+    return {
+        "00404005": {"vr": "DT", "Value": ["20220102120000"]},
+        "00404011": {"vr": "DT", "Value": ["20220102130000"]},
+    }
+
+
+@pytest.fixture(autouse=True)
 def sample_ups_workitem() -> dict[str, Any]:
     """
     Create a sample UPS workitem for testing.
@@ -138,11 +228,11 @@ def sample_ups_workitem() -> dict[str, Any]:
         "00080016": {"vr": "UI", "Value": ["1.2.840.10008.5.1.4.34.6.1"]},  # SOP Class UID (UPS Push)
         "00080018": {"vr": "UI", "Value": [f"{generate_uid()}"]},  # SOP Instance UID
         "00080054": {"vr": "AE", "Value": ["TESTSTATION"]},  # Retrieve AE Title
-        "00080056": {"vr": "CS", "Value": ["TESTMODALITY"]},  # Instance Availability
+        "00080056": {"vr": "CS", "Value": ["READY"]},  # Instance Availability
         "00100010": {"vr": "PN", "Value": [{"Alphabetic": "TEST^PATIENT"}]},  # Patient Name
         "00100020": {"vr": "LO", "Value": ["TEST-ID-123"]},  # Patient ID
         "00100030": {"vr": "DA", "Value": ["20230101"]},  # Patient Birth Date
-        "00404041": {"vr": "CS", "Value": ["SCHEDULED"]},  # Input Readiness State
+        "00404041": {"vr": "CS", "Value": ["READY"]},  # Input Readiness State
         "00404005": {"vr": "DT", "Value": [(datetime.now()).strftime("%Y%m%d%H%M%S")]},  # Scheduled Start DateTime
         "00404010": {
             "vr": "DT",
@@ -162,7 +252,7 @@ def sample_ups_workitem() -> dict[str, Any]:
             "vr": "SQ",
             "Value": [  # Scheduled Station Class Code
                 {
-                    "00080100": {"vr": "SH", "Value": ["TEST_STATION_CLASS"]},  # Code Value
+                    "00080100": {"vr": "SH", "Value": ["STATION_CLASS"]},  # Code Value
                     "00080102": {"vr": "SH", "Value": ["99TEST"]},  # Coding Scheme Designator
                     "00080104": {"vr": "LO", "Value": ["Test Station Class"]},  # Code Meaning
                 }
@@ -192,7 +282,7 @@ def sample_ups_workitem() -> dict[str, Any]:
     }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def ups_state_report() -> dict[str, Any]:
     """
     Create a sample UPS state report for testing.
@@ -217,7 +307,7 @@ def ups_state_report() -> dict[str, Any]:
     }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def ups_subscription_request() -> dict[str, Any]:
     """
     Create a sample UPS subscription request for testing.
@@ -232,7 +322,7 @@ def ups_subscription_request() -> dict[str, Any]:
     }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def ups_search_params() -> dict[str, str]:
     """
     Create sample DICOMWeb UPS-RS search parameters.
@@ -253,7 +343,7 @@ def ups_search_params() -> dict[str, str]:
     }
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def create_ups_filter_params() -> Callable[..., str]:
     """
     Create a factory function to generate UPS-RS filter parameters.
@@ -264,12 +354,12 @@ def create_ups_filter_params() -> Callable[..., str]:
     """
 
     def _create_params(
-        patient_id: Optional[str] = None,
-        patient_name: Optional[str] = None,
-        state: Optional[list[str]] = None,
-        start_date_range: Optional[tuple[str, str]] = None,
-        scheduled_aet: Optional[str] = None,
-        worklist_label: Optional[str] = None,
+        patient_id: str | None = None,
+        patient_name: str | None = None,
+        state: list[str] | None = None,
+        start_date_range: tuple[str, str] | None = None,
+        scheduled_aet: str | None = None,
+        worklist_label: str | None = None,
     ) -> str:
         """
         Create UPS-RS filter parameters string.
@@ -311,7 +401,7 @@ def create_ups_filter_params() -> Callable[..., str]:
     return _create_params
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 async def mock_dicom_db_session() -> AsyncGenerator[None, None]:
     """
     Create a mock database session for DICOM storage testing.
@@ -345,7 +435,7 @@ async def mock_dicom_db_session() -> AsyncGenerator[None, None]:
     yield None
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def uvicorn_config() -> dict[str, Any]:
     """
     Define Uvicorn server configuration for testing.
