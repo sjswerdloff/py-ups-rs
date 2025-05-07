@@ -344,16 +344,28 @@ class NotificationService(LoggerMixin):
         """
         Send a notification for workitem creation.
 
-        Note that a UPS State Report should go out when a subscriber (first) subscribes for a specific UPS/workitem.
-        Not when the workitem is created/scheduled.  However, when the state *changes* (e.g. from SCHEDULED to IN PROGRESS),
-        a UPS State Report should be sent.
+        See C.C.2.4.3 for expected  behavior.
+
+        Note that a UPS State Report should go out when a subscriber (first) subscribes for a specific UPS/workitem
+        or for any matching filtered workitem that is already present and being tracked.
+        Notification to a new subscriber about workitems that are present but already completed or canceled appears
+        to be optional.
+
 
         Args:
             workitem: The created workitem.
 
         """
-        event_report_message = create_ups_assigned_report(workitem.ds)
+        event_report_message = create_ups_state_report(
+            workitem.ds.AffectedSOPInstanceUID,
+            workitem.ds.ProcedureStepState,
+            workitem.ds.InputReadinessState,
+        )
         self._send_notification(workitem.uid, event_report_message)
+        if workitem.ds.ScheduledStationNameCodeSequence or workitem.ds.HumanPerformerCodeSequence:
+            self.logger.warning("Notifying of workitem creation")
+            event_report_message = create_ups_assigned_report(workitem.ds)
+            self._send_notification(workitem.uid, event_report_message)
 
     def _get_element_value_if_present(self, ds: Dataset, element_name: str) -> Any | None:  # noqa: ANN401
         element: DataElement = ds.get(element_name)
