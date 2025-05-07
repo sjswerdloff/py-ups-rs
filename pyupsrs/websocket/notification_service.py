@@ -356,12 +356,12 @@ class NotificationService(LoggerMixin):
             workitem: The created workitem.
 
         """
-        event_report_message = create_ups_state_report(
-            workitem.ds.AffectedSOPInstanceUID,
-            workitem.ds.ProcedureStepState,
-            workitem.ds.InputReadinessState,
-        )
-        self._send_notification(workitem.uid, event_report_message)
+        # event_report_message = create_ups_state_report(
+        #     workitem.uid,
+        #     workitem.ds.ProcedureStepState,
+        #     workitem.ds.InputReadinessState,
+        # )
+        # self._send_notification(workitem.uid, event_report_message)
         if workitem.ds.ScheduledStationNameCodeSequence or workitem.ds.HumanPerformerCodeSequence:
             self.logger.warning("Notifying of workitem creation")
             event_report_message = create_ups_assigned_report(workitem.ds)
