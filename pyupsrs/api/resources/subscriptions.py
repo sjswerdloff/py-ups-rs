@@ -54,8 +54,7 @@ class SubscriptionSuspendResource(LoggerMixin):
             aetitle: The AE Title of the suspend requestor.
 
         """
-        # TODO: Implement subscription creation
-        resp.status = falcon.HTTP_201
+        resp.status = falcon.HTTP_200
         resp.content_type = "application/dicom+json"
         path = req.path
         workitem_uid = None
@@ -63,9 +62,13 @@ class SubscriptionSuspendResource(LoggerMixin):
             workitem_uid = GLOBAL_SUBSCRIPTION_UID
         elif FILTERED_SUBSCRIPTION_UID in path:
             workitem_uid = FILTERED_SUBSCRIPTION_UID
+        self.logger.warning(f"Attempting to suspend subscription for {aetitle} to {workitem_uid}")
         suspended = self.subscription_service.suspend(workitem_uid=workitem_uid, ae_title=aetitle)
+
         if not suspended:
             resp.status = falcon.HTTP_404
+        else:
+            self.logger.debug(f"Suspended: {suspended}")
 
 
 class SubscriptionResource(LoggerMixin):
@@ -162,16 +165,24 @@ class SubscriptionResource(LoggerMixin):
         resp.status = falcon.HTTP_201
         resp.content_type = "application/dicom+json"
         deletion_lock = req.get_param_as_bool("deletionlock")
-
+        self.logger.warning(f"path = {req.path}")
         subscription_filter = None
 
         params = dict(req.params)
+        self.logger.warning(f"Subscription Params: {params}")
         if "deletionlock" in params:
             del params["deletionlock"]
-        if params:
+        if "filter" in params:
+            filter_paired_strings = params["filter"].split(",")
+            filter_element_dict = {}
+            for filter_element in filter_paired_strings:
+                key, value = filter_element.split("=")
+                filter_element_dict[key] = value
+
             # what's left is a list of matching parameters, either as keywords or as hex values
             query_ds = Dataset()
-            for key, value in params.items():
+            for key, value in filter_element_dict.items():
+                self.logger.warning(f"Filtering element: {key} = {value}")
                 try:
                     tag = int(key, base=16)
 
@@ -182,7 +193,9 @@ class SubscriptionResource(LoggerMixin):
                         query_ds.add(DataElement(tag=keyword, VR=datadict.dictionary_VR(keyword), value=value))
                     except ValueError:
                         self.logger.error(f"Filtering element had invalid tag or keyword: {key}")
+
             subscription_filter = query_ds
+            self.logger.warning(f"Subscription Filter: {subscription_filter}")
 
         if not workitem_uid:
             if subscription_filter:
@@ -193,6 +206,7 @@ class SubscriptionResource(LoggerMixin):
         subscription = Subscription(
             workitem_uid=workitem_uid, ae_title=aetitle, deletion_lock=deletion_lock, filter=subscription_filter
         )
+        self.logger.warning(f"Subscription: {subscription}")
         self.subscription_service.create_subscription(subscription)
 
         # Add WebSocket URL to response header

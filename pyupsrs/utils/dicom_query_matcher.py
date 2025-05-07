@@ -1,9 +1,11 @@
+"""Module for DICOM query matching functionality."""
+
 import re
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+
 import pydicom
-from pydicom.dataset import Dataset
 import pydicom.valuerep
+from pydicom.dataset import Dataset
 
 # DICOM VR constants
 DT = "DT"  # Date Time
@@ -11,7 +13,7 @@ TM = "TM"  # Time
 DA = "DA"  # Date
 
 
-def parse_dicom_date(date_str: str) -> Optional[datetime]:
+def parse_dicom_date(date_str: str) -> datetime | None:
     """
     Parse a DICOM date/time string into a Python datetime object.
 
@@ -22,51 +24,51 @@ def parse_dicom_date(date_str: str) -> Optional[datetime]:
 
     Returns None if parsing fails.
     """
-    if not date_str or date_str == '*':
+    if not date_str or date_str == "*":
         return None
 
     try:
         # Remove any timezone offset for simplicity
-        date_str = date_str.split('+')[0].split('-')[0]
+        date_str = date_str.split("+")[0].split("-")[0]
 
         # Handle DA format (YYYYMMDD)
         if len(date_str) == 8:
-            return datetime.strptime(date_str, '%Y%m%d')
+            return datetime.strptime(date_str, "%Y%m%d")
 
         # Handle TM format (HHMMSS.FFFFFF)
-        elif len(date_str) <= 16 and '.' in date_str:
-            parts = date_str.split('.')
-            time_part = parts[0].ljust(6, '0')  # Pad with zeros if needed
+        elif len(date_str) <= 16 and "." in date_str:
+            parts = date_str.split(".")
+            time_part = parts[0].ljust(6, "0")  # Pad with zeros if needed
             if len(time_part) > 6:
                 time_part = time_part[:6]
 
             if len(parts) > 1:
                 # Handle microseconds
-                micro = parts[1].ljust(6, '0')[:6]
-                return datetime.strptime(f'19000101{time_part}.{micro}', '%Y%m%d%H%M%S.%f')
+                micro = parts[1].ljust(6, "0")[:6]
+                return datetime.strptime(f"19000101{time_part}.{micro}", "%Y%m%d%H%M%S.%f")
             else:
-                return datetime.strptime(f'19000101{time_part}', '%Y%m%d%H%M%S')
+                return datetime.strptime(f"19000101{time_part}", "%Y%m%d%H%M%S")
 
         # Handle TM format without microseconds
         elif len(date_str) <= 6:
-            time_part = date_str.ljust(6, '0')  # Pad with zeros if needed
+            time_part = date_str.ljust(6, "0")  # Pad with zeros if needed
             if len(time_part) > 6:
                 time_part = time_part[:6]
-            return datetime.strptime(f'19000101{time_part}', '%Y%m%d%H%M%S')
+            return datetime.strptime(f"19000101{time_part}", "%Y%m%d%H%M%S")
 
         # Handle DT format (YYYYMMDDHHMMSS.FFFFFF)
         else:
-            parts = date_str.split('.')
-            datetime_part = parts[0].ljust(14, '0')  # Pad with zeros if needed
+            parts = date_str.split(".")
+            datetime_part = parts[0].ljust(14, "0")  # Pad with zeros if needed
             if len(datetime_part) > 14:
                 datetime_part = datetime_part[:14]
 
             if len(parts) > 1:
                 # Handle microseconds
-                micro = parts[1].ljust(6, '0')[:6]
-                return datetime.strptime(f'{datetime_part}.{micro}', '%Y%m%d%H%M%S.%f')
+                micro = parts[1].ljust(6, "0")[:6]
+                return datetime.strptime(f"{datetime_part}.{micro}", "%Y%m%d%H%M%S.%f")
             else:
-                return datetime.strptime(datetime_part, '%Y%m%d%H%M%S')
+                return datetime.strptime(datetime_part, "%Y%m%d%H%M%S")
     except Exception as e:
         print(f"Error parsing DICOM date '{date_str}': {e}")
         return None
@@ -82,18 +84,18 @@ def match_datetime(query_datetime: str, dataset_datetime: str) -> bool:
     - Wildcard matching with '*' and '?'
     - Proper chronological comparison using datetime objects
     """
-    if not query_datetime or query_datetime == '*':
+    if not query_datetime or query_datetime == "*":
         # Empty query matches anything
         return True
 
     # Handle wildcard patterns first
-    if '*' in query_datetime or '?' in query_datetime:
+    if "*" in query_datetime or "?" in query_datetime:
         pattern = "^" + query_datetime.replace("*", ".*").replace("?", ".") + "$"
         return bool(re.match(pattern, dataset_datetime))
 
     # Handle range matching
-    if '-' in query_datetime:
-        range_parts = query_datetime.split('-')
+    if "-" in query_datetime:
+        range_parts = query_datetime.split("-")
         if len(range_parts) == 2:
             start_date_str, end_date_str = range_parts
 
@@ -135,6 +137,7 @@ def match_ups_specific_attributes(query: Dataset, dataset: Dataset, tag: int) ->
 
     Returns:
         bool: True if matches, False otherwise
+
     """
     elem = query[tag]
     query_value = elem.value
@@ -169,13 +172,10 @@ def is_code_sequence(elem: pydicom.DataElement, tag: int = None) -> bool:
 
     # Check if the first item has the expected attributes of a code sequence
     first_item = elem.value[0]
-    return ("CodeValue" in first_item and
-            "CodingSchemeDesignator" in first_item and
-            "CodeMeaning" in first_item)
+    return "CodeValue" in first_item and "CodingSchemeDesignator" in first_item and "CodeMeaning" in first_item
 
 
-def match_code_sequence(query_seq: List[Dataset], dataset_seq: List[Dataset],
-                        tag: int = None) -> bool:
+def match_code_sequence(query_seq: list[Dataset], dataset_seq: list[Dataset], tag: int = None) -> bool:
     """
     Match code sequences according to DICOM rules, with special handling for UPS sequences.
 
@@ -186,6 +186,7 @@ def match_code_sequence(query_seq: List[Dataset], dataset_seq: List[Dataset],
 
     Returns:
         bool: True if sequences match, False otherwise
+
     """
     if not query_seq:  # Empty query sequence matches anything
         return True
@@ -215,8 +216,7 @@ def match_code_sequence(query_seq: List[Dataset], dataset_seq: List[Dataset],
             if "CodeValue" not in ds_item or "CodingSchemeDesignator" not in ds_item:
                 continue
 
-            if (ds_item.CodeValue == query_code_value and
-                ds_item.CodingSchemeDesignator == query_scheme):
+            if ds_item.CodeValue == query_code_value and ds_item.CodingSchemeDesignator == query_scheme:
                 match_found = True
                 break
 
@@ -226,7 +226,7 @@ def match_code_sequence(query_seq: List[Dataset], dataset_seq: List[Dataset],
     return True
 
 
-def match_scheduled_station_name(query_seq: List[Dataset], dataset_seq: List[Dataset]) -> bool:
+def match_scheduled_station_name(query_seq: list[Dataset], dataset_seq: list[Dataset]) -> bool:
     """
     Match Scheduled Station Name Code Sequence according to IHE-RO TDW-II rules.
 
@@ -246,8 +246,7 @@ def match_scheduled_station_name(query_seq: List[Dataset], dataset_seq: List[Dat
             if "CodeValue" not in ds_item or "CodingSchemeDesignator" not in ds_item:
                 continue
 
-            if (ds_item.CodeValue == query_code_value and
-                ds_item.CodingSchemeDesignator == query_scheme):
+            if ds_item.CodeValue == query_code_value and ds_item.CodingSchemeDesignator == query_scheme:
                 match_found = True
                 break
 
@@ -257,7 +256,7 @@ def match_scheduled_station_name(query_seq: List[Dataset], dataset_seq: List[Dat
     return True
 
 
-def match_scheduled_workitem_code(query_seq: List[Dataset], dataset_seq: List[Dataset]) -> bool:
+def match_scheduled_workitem_code(query_seq: list[Dataset], dataset_seq: list[Dataset]) -> bool:
     """
     Match Scheduled Workitem Code Sequence according to IHE-RO TDW-II rules.
 
@@ -277,8 +276,7 @@ def match_scheduled_workitem_code(query_seq: List[Dataset], dataset_seq: List[Da
             if "CodeValue" not in ds_item or "CodingSchemeDesignator" not in ds_item:
                 continue
 
-            if (ds_item.CodeValue == query_code_value and
-                ds_item.CodingSchemeDesignator == query_scheme):
+            if ds_item.CodeValue == query_code_value and ds_item.CodingSchemeDesignator == query_scheme:
                 match_found = True
                 break
 
@@ -289,9 +287,7 @@ def match_scheduled_workitem_code(query_seq: List[Dataset], dataset_seq: List[Da
 
 
 def match_query_to_dataset(query: Dataset, dataset: Dataset) -> bool:
-    """
-    Match a DICOM query against a dataset, with special handling for UPS attributes.
-    """
+    """Match a DICOM query against a dataset, with special handling for UPS attributes."""
     # Iterate through each element in the query
     for elem in query:
         tag = elem.tag
@@ -372,7 +368,7 @@ def match_query_to_dataset(query: Dataset, dataset: Dataset) -> bool:
     return True
 
 
-def query_datasets(query: Dataset, datasets: List[Dataset]) -> List[Dataset]:
+def query_datasets(query: Dataset, datasets: list[Dataset]) -> list[Dataset]:
     """
     Find all datasets matching the DICOM query.
 
@@ -381,18 +377,20 @@ def query_datasets(query: Dataset, datasets: List[Dataset]) -> List[Dataset]:
         datasets: List of datasets to search
 
     Returns:
-        List[Dataset]: List of matching datasets
+        list[Dataset]: List of matching datasets
+
     """
     return [ds for ds in datasets if match_query_to_dataset(query, ds)]
 
 
 # Example usage with UPS for IHE-RO TDW-II
-def example_ups_query():
+def example_ups_query() -> list[Dataset]:
     """
-    Example of using the query matcher with UPS in the IHE-RO TDW-II context.
+    Provide Example of using the query matcher with UPS in the IHE-RO TDW-II context.
 
     Returns:
-        List[Dataset]: List of matching UPS instances
+        list[Dataset]: List of matching UPS instances
+
     """
     # Create a UPS query for IHE-RO TDW-II
     query = Dataset()

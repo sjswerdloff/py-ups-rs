@@ -1,7 +1,6 @@
 """Mixin Logger for per Class logging."""
 
 import logging
-from typing import Optional
 
 
 class LoggerMixin:
@@ -35,7 +34,7 @@ class LoggerMixin:
         return self.get_logger()
 
 
-def configure_logging(level: int = logging.INFO, log_format: Optional[str] = None, log_file: Optional[str] = None) -> None:
+def configure_logging(level: int = logging.INFO, log_format: str | None = None, log_file: str | None = None) -> None:
     """
     Configure the logging system.
 

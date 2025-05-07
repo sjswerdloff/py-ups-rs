@@ -110,4 +110,5 @@ disallow_incomplete_defs = false
 dev = [
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
 ]

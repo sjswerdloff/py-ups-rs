@@ -1,14 +1,14 @@
 """Repository for accessing UPS subscriptions."""
 
 from copy import deepcopy
-from typing import Optional
 
 from pyupsrs.domain.models.ups import Subscription
+from pyupsrs.utils.class_logger import LoggerMixin
 
 _local_store: set[Subscription] = set()
 
 
-class SubscriptionRepository:
+class SubscriptionRepository(LoggerMixin):
     """Repository for UPS subscriptions."""
 
     def __init__(self, database_uri: str) -> None:
@@ -33,10 +33,37 @@ class SubscriptionRepository:
 
         """
         # TODO: Implement database persistence
+
+        self._discard_suspended_equivalent(subscription)
         _local_store.add(subscription)
         return subscription
 
-    def get_by_ae_title(self,  ae_title: str) -> Optional[list[Subscription]]:
+    def _discard_suspended_equivalent(self, subscription: Subscription) -> None:
+        self.logger.warning(f"Checking for suspended equivalent for {subscription}")
+        if get_by_workitem_and_ae_title := self.get_by_workitem_and_ae_title(subscription.workitem_uid, subscription.ae_title):
+            self.logger.warning(f"Current {get_by_workitem_and_ae_title} contains equivalent for requested {subscription}")
+            for existing_subscription in get_by_workitem_and_ae_title:
+                self.logger.warning(f"{existing_subscription} is equivalent to requested {subscription}")
+                if existing_subscription.suspended:
+                    self.logger.warning(f"Discarding suspended equivalent {existing_subscription}")
+                    _local_store.discard(existing_subscription)
+
+    def get_by_workitem_and_ae_title(self, workitem_uid: str, ae_title: str) -> list[Subscription] | None:
+        """
+        Get a subscription by workitem and ae title.
+
+        Args:
+            workitem_uid: The UID of the workitem.
+            ae_title: The AE Title of the subscriber.
+
+        Returns:
+            The subscription, or None if not found.
+
+        """
+        # TODO: Implement database retrieval
+        return [deepcopy(x) for x in _local_store if x.ae_title == ae_title and x.workitem_uid == workitem_uid]
+
+    def get_by_ae_title(self, ae_title: str) -> list[Subscription] | None:
         """
         Get a subscription by workitem and ae title.
 

@@ -30,13 +30,16 @@ class ConnectionManager:
         try:
             # Keep the connection alive
             async for _message in websocket:
+                self.logger.info(f"Received message{_message} from subscriber {subscriber_id}")
                 # Process incoming messages if needed
                 pass
         except websockets.exceptions.ConnectionClosed:
             self.logger.info(f"Connection closed from subscriber {subscriber_id}")
         finally:
-            # Clean up when the connection is closed
-            self._remove_connection(subscriber_id)
+            # Clean up when the connection is closed, but don't remove the subscriptions.
+            #  This is to allow for reactivation of the websocket connection itself (without there being a re-subscription).
+            self.logger.debug(f"Removing websocket connection (only) when connection is closed for {subscriber_id}")
+            del self.connections[subscriber_id]
 
     def subscribe(self, subscriber_id: str, workitem_uid: str) -> None:
         """
@@ -55,7 +58,7 @@ class ConnectionManager:
             self.subscriber_to_workitems[subscriber_id] = set()
         self.subscriber_to_workitems[subscriber_id].add(workitem_uid)
 
-        self.logger.debug(f"Subscriber {subscriber_id} subscribed to {workitem_uid}")
+        self.logger.warning(f"Subscriber {subscriber_id} subscribed to {workitem_uid}")
 
     def unsubscribe(self, subscriber_id: str, workitem_uid: str) -> None:
         """

@@ -84,7 +84,8 @@ class FalconWebSocketAdapter:
             try:
                 msg = await self.ws.receive_text()
                 yield msg
-            except falcon.WebSocketDisconnected:
+            except falcon.WebSocketDisconnected as e_disconnect:
+                self.logger.warning(f"WebSocket disconnected: {e_disconnect}")
                 break
             except Exception as e:
                 self.logger.error(f"Error receiving message: {e}")

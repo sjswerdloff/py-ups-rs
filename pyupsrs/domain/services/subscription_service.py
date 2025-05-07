@@ -57,8 +57,11 @@ class SubscriptionService(LoggerMixin):
                 suspended=True,
             )
             ServiceProvider.get_instance().connection_manager.unsubscribe(ae_title, workitem_uid)  # equivalent to suspend
+            self.logger.warning(f"Suspended connection manager subscription for {ae_title} to {workitem_uid}")
             self.delete_subscription(subscription_to_suspend.workitem_uid, subscription_to_suspend.ae_title)
+            self.logger.warning(f"Deleted SubscriptionService subscription for {ae_title} to {workitem_uid}")
             self.create_subscription(suspended_subscription)
             return True
         else:
+            self.logger.warning(f"No subscription found for {ae_title} to {workitem_uid}")
             return False

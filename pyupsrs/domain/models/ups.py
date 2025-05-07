@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydicom.dataset import Dataset
 from pydicom.errors import InvalidDicomError
@@ -133,6 +132,6 @@ class Subscription:
     ae_title: str
     created_at: datetime = field(default_factory=datetime.now)
     deletion_lock: bool = False
-    contact_uri: Optional[str] = None
-    filter: Dataset | None = None
+    contact_uri: str | None = None
+    filter: Dataset | None = field(hash=False, default=None)
     suspended: bool = False  # This implies that to suspend, a new subscription has to be created and the old one deleted

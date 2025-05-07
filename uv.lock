@@ -598,6 +598,7 @@ docs = [
 dev = [
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
@@ -625,6 +626,7 @@ provides-extras = ["dev", "docs"]
 dev = [
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pytest-asyncio", specifier = ">=0.26.0" },
 ]
 
 [[package]]

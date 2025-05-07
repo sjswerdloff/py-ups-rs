@@ -6,6 +6,7 @@ based on DICOM PS3.18 standard, running on Falcon 4.0.2 with ASGI/Uvicorn.
 
 """
 
+import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta
@@ -42,6 +43,7 @@ def falcon_app() -> App:
     from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
     from pyupsrs.config import get_config
     from pyupsrs.domain.services.service_provider import ServiceProvider
+    from pyupsrs.utils.class_logger import configure_logging
 
     # the same variable name has to be used in routes that are children of the same parent.
     # so workitem_uid for subscribers is necessary, and needs to be interpreted as
@@ -61,6 +63,7 @@ def falcon_app() -> App:
     # Create the Falcon application
     app = App(middleware=middleware)
 
+    configure_logging(level=logging.getLevelNamesMapping()[str(config.log_level).upper()])
     # Get shared services
     service_provider = ServiceProvider.get_instance()
 

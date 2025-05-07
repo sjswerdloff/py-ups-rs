@@ -8,8 +8,10 @@ from typing import Any
 
 from pydicom import DataElement, Dataset, Sequence
 
+import pyupsrs.domain.services.service_provider as service_provider  # avoid circular reference to ServiceProvider singleton
 from pyupsrs.domain.models.ups import FILTERED_SUBSCRIPTION_UID, GLOBAL_SUBSCRIPTION_UID, WorkItem
 from pyupsrs.utils.class_logger import LoggerMixin
+from pyupsrs.utils.dicom_query_matcher import match_query_to_dataset
 from pyupsrs.websocket.connection_manager import ConnectionManager
 
 _message_id: int = 1
@@ -406,10 +408,24 @@ class NotificationService(LoggerMixin):
         self._send_notification(workitem.uid, message=event_report_message)
 
     def _match_on_filter(self, filtered_subscribers: list, workitem_uid: str) -> list:
-        # for now, just pass everything.
-        # TODO:  provide filtering of the subscriber based on the filter for the subscriber and the content of the
+        # provide filtering of the subscriber based on the filter for the subscriber and the content of the
         # workitem (which will be retrieved based on it's UID)
-        return filtered_subscribers
+        self.logger.warning(f"Matching subscribers for workitem UID: {workitem_uid}")
+        matching_subscribers = []
+        for subscriber_id in filtered_subscribers:
+            subscriptions = service_provider.ServiceProvider.get_instance().subscription_service.get_by_ae_title(subscriber_id)
+
+            for subscription in subscriptions:
+                self.logger.warning(f"Checking filter for {subscriber_id} for workitem UID: {workitem_uid}")
+                self.logger.warning(f"Subscription: {subscription}")
+                filter = subscription.filter or Dataset()
+                workitem = service_provider.ServiceProvider.get_instance().workitem_repo.get_by_uid(workitem_uid)
+                workitem_ds = workitem.ds if hasattr(workitem, "ds") else None
+                if filter and workitem_ds and match_query_to_dataset(filter, workitem_ds):
+                    self.logger.warning(f"Matched filter for {subscriber_id} for workitem UID: {workitem_uid}")
+                    self.logger.warning(f"Filter: {filter}")
+                    matching_subscribers.append(subscriber_id)
+        return matching_subscribers
 
     def _send_notification(self, workitem_uid: str, message: Dataset) -> None:
         """
@@ -421,8 +437,11 @@ class NotificationService(LoggerMixin):
 
         """
         subscribers = self.connection_manager.get_subscribers(workitem_uid)
+        self.logger.warning(f"Subscribers to specific workitem UID: {subscribers} for workitem UID: {workitem_uid}")
         global_subscribers = self.connection_manager.get_subscribers(GLOBAL_SUBSCRIPTION_UID)
+        self.logger.warning(f"Subscribers to global workitem UID: {global_subscribers}")
         filtered_subscribers = self.connection_manager.get_subscribers(FILTERED_SUBSCRIPTION_UID)
+        self.logger.warning(f"Subscribers to filtered workitem UID: {filtered_subscribers}")
 
         if global_subscribers:
             for subscriber in global_subscribers:
@@ -435,6 +454,10 @@ class NotificationService(LoggerMixin):
         self.logger.warning(f"{len(subscribers)} Subscribers: {subscribers} for workitem UID: {workitem_uid}")
         self.logger.debug(f"Sending notification to {len(subscribers)} subscribers for {workitem_uid}")
         for subscriber_id in subscribers:
+            subscription = service_provider.ServiceProvider.get_instance().subscription_service.get_by_ae_title(subscriber_id)
+            if subscription and subscription[0].suspended:
+                self.logger.warning(f"Subscription for {subscriber_id} is suspended, not sending notification")
+                continue
             try:
                 loop = asyncio.get_event_loop()  # Or however you access your running event loop
 
