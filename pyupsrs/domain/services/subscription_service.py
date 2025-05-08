@@ -1,7 +1,7 @@
 """Subscription service."""
 
+import pyupsrs.domain.services.service_provider as service_provider_svc
 from pyupsrs.domain.models.ups import Subscription
-from pyupsrs.domain.services.service_provider import ServiceProvider
 from pyupsrs.storage.repositories.subscription_repository import SubscriptionRepository
 from pyupsrs.utils.class_logger import LoggerMixin
 
@@ -20,13 +20,39 @@ class SubscriptionService(LoggerMixin):
         self.subscription_repository = subscription_repository
 
     def create_subscription(self, subscription: Subscription) -> Subscription:
-        """Cache Subscription in Connection Manager and Persist in repository."""
-        ServiceProvider.get_instance().connection_manager.subscribe(subscription.ae_title, subscription.workitem_uid)
-        return self.subscription_repository.create(subscription)
+        """
+        Cache Subscription in Connection Manager and Persist in repository.
+
+        Args:
+            subscription: The subscription to create.
+
+        Returns:
+            The created subscription.
+
+        """
+        # Store the subscription in the connection manager
+        service_provider_svc.ServiceProvider.get_instance().connection_manager.subscribe(
+            subscription.ae_title, subscription.workitem_uid
+        )
+
+        # Persist the subscription in the repository
+        created_subscription = self.subscription_repository.create(subscription)
+
+        # Queue initial state reports for the new subscription
+        try:
+            self.logger.info(
+                f"Queueing initial state reports for {subscription.ae_title} subscription to {subscription.workitem_uid}"
+            )
+            notification_service = service_provider_svc.ServiceProvider.get_instance().notification_service
+            notification_service.queue_state_reports(subscription)
+        except Exception as e:
+            self.logger.error(f"Failed to queue initial state reports for {subscription.ae_title}: {e}")
+
+        return created_subscription
 
     def delete_subscription(self, workitem_uid: str, ae_title: str) -> bool:
         """Remove subscription from Connection Manager cache and delete from repository."""
-        ServiceProvider.get_instance().connection_manager.unsubscribe(ae_title, workitem_uid)
+        service_provider_svc.ServiceProvider.get_instance().connection_manager.unsubscribe(ae_title, workitem_uid)
         return self.subscription_repository.delete(workitem_uid, ae_title)
 
     def get_by_ae_title(self, ae_title: str) -> list[Subscription]:
@@ -56,7 +82,9 @@ class SubscriptionService(LoggerMixin):
                 filter=subscription_to_suspend.filter,
                 suspended=True,
             )
-            ServiceProvider.get_instance().connection_manager.unsubscribe(ae_title, workitem_uid)  # equivalent to suspend
+            service_provider_svc.ServiceProvider.get_instance().connection_manager.unsubscribe(
+                ae_title, workitem_uid
+            )  # equivalent to suspend
             self.logger.warning(f"Suspended connection manager subscription for {ae_title} to {workitem_uid}")
             self.delete_subscription(subscription_to_suspend.workitem_uid, subscription_to_suspend.ae_title)
             self.logger.warning(f"Deleted SubscriptionService subscription for {ae_title} to {workitem_uid}")

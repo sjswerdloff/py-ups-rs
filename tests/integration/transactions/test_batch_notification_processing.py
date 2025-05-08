@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 import uuid
 from copy import deepcopy
 from typing import Any
@@ -93,7 +94,7 @@ class TestBatchNotificationProcessing:
         6. Verifies all state change notifications are received
         """
         # Create a unique subscriber AE title
-        aetitle = f"BATCH_AE_{uuid.uuid4().hex[:6]}"  # AE Titles are limited to 16 characters
+        aetitle = f"BATCH_AE_{uuid.uuid4().hex[:6]}"[:16]  # AE Titles are limited to 16 characters
 
         # Global subscription well-known UID
         global_uid = "1.2.840.10008.5.1.4.34.5"
@@ -104,15 +105,9 @@ class TestBatchNotificationProcessing:
         # Use ASGIConductor for WebSocket testing
         async with client as conductor:
             # Create global subscription
-            payload = {
-                "00741234": {"vr": "AE", "Value": [aetitle]},
-                "00741000": {"vr": "CS", "Value": ["SCHEDULED", "IN PROGRESS", "COMPLETED", "CANCELED"]},
-            }
-            payload_bytes = json.dumps(payload).encode("utf-8")
 
             response = await conductor.simulate_post(
                 f"/workitems/{global_uid}/subscribers/{aetitle}",
-                body=payload_bytes,
                 headers={"Content-Type": "application/dicom+json"},
             )
             assert response.status_code == 201
@@ -130,7 +125,7 @@ class TestBatchNotificationProcessing:
                 # Verify connection is established
                 await ws.wait_ready()
                 assert ws.ready, "WebSocket connection not ready"
-
+                time.sleep(2)
                 # Step 1: Rapidly create multiple workitems
                 workitem_uids = []
                 for i in range(num_workitems):
@@ -145,9 +140,15 @@ class TestBatchNotificationProcessing:
                     workitem_uids.append(workitem_uid)
                     print(f"Created workitem {i + 1} with UID: {workitem_uid}")
 
-                # Step 2: Verify all notifications are received in the correct order
+                scheduled_workitems = num_workitems
+                assigned_workitems = num_workitems
+                received_assigned_workitems = 0
+                received_scheduled_workitems = 0
+
+                # Step 2: Verify all notifications are received (in the correct order?)
                 received_uids = []
-                for i in range(num_workitems):
+                i = 0
+                for i in range(scheduled_workitems + assigned_workitems):
                     try:
                         # Set a reasonable timeout for the test
                         msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
@@ -155,15 +156,47 @@ class TestBatchNotificationProcessing:
                         # Verify the notification contains correct data
                         assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
                         uid = msg["00001000"]["Value"][0]
-                        received_uids.append(uid)
+
+                        assert "00001002" in msg, "Missing Event Type ID"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            received_scheduled_workitems += 1
+                        elif event_type_id == 5:  # UPS Assigned
+                            received_assigned_workitems += 1
+                            received_uids.append(uid)  # only track assigned workitems (ignore state changes)
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
+
                         assert "00741000" in msg, "Missing Procedure Step State in notification"
                         assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
                     except TimeoutError as err:
-                        raise AssertionError(f"Did not receive notification {i + 1} out of {num_workitems}") from err
+                        raise AssertionError(
+                            f"Did not receive notification {i + 1} out of "
+                            f"{scheduled_workitems + assigned_workitems}, expecting 2 per workitem"
+                        ) from err
 
+                count_received_uids = len(received_uids)
+                count_no_dupes = len(set(received_uids))
                 # Verify all workitems were notified
                 # Note: Order might not be guaranteed due to concurrent processing
-                assert set(received_uids) == set(workitem_uids), "Not all workitem notifications were received"
+                assert set(received_uids) == set(workitem_uids), (
+                    f"Not all workitem notifications were received:"
+                    f"{len(set(received_uids))} out of {len(set(workitem_uids))}"
+                    f"Duplicate UIDs received: {count_received_uids - count_no_dupes}"
+                    f"Missing: {set(workitem_uids) - set(received_uids)}"
+                    f"Extra: {set(received_uids) - set(workitem_uids)}"
+                )
+
+                # Clear out any remaining messages
+                print("Clearing out any remaining messages")
+                remaining_count = 0
+                try:
+                    while True:
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                        remaining_count += 1
+                        print(f"Remaining message {remaining_count} with content: {msg}")
+                except TimeoutError:
+                    pass
 
                 # Step 3: Prepare for batch state changes
                 # We'll change each workitem's state to IN PROGRESS

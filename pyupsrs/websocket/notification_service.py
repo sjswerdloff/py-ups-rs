@@ -9,7 +9,7 @@ from typing import Any
 from pydicom import DataElement, Dataset, Sequence
 
 import pyupsrs.domain.services.service_provider as service_provider  # avoid circular reference to ServiceProvider singleton
-from pyupsrs.domain.models.ups import FILTERED_SUBSCRIPTION_UID, GLOBAL_SUBSCRIPTION_UID, WorkItem
+from pyupsrs.domain.models.ups import FILTERED_SUBSCRIPTION_UID, GLOBAL_SUBSCRIPTION_UID, Subscription, WorkItem
 from pyupsrs.utils.class_logger import LoggerMixin
 from pyupsrs.utils.dicom_query_matcher import match_query_to_dataset
 from pyupsrs.websocket.connection_manager import ConnectionManager
@@ -339,33 +339,114 @@ class NotificationService(LoggerMixin):
 
         """
         self.connection_manager = connection_manager
+        self.pending_notifications: dict[str, list[Dataset]] = {}  # subscriber_id -> list of notifications
+
+        # Register for connection events
+        self.logger.info("Registering for connection events")
+        self.connection_manager.register_connection_callback(self.on_connection_established)
+
+    def queue_state_reports(self, subscription: Subscription) -> None:
+        """
+        Queue required state reports for a new subscription.
+
+        Args:
+            subscription: The newly created subscription.
+
+        """
+        ae_title = subscription.ae_title
+        workitem_uid = subscription.workitem_uid
+
+        # Initialize the pending notifications queue for this subscriber if needed
+        if ae_title not in self.pending_notifications:
+            self.pending_notifications[ae_title] = []
+
+        # For a specific UPS instance subscription
+        if workitem_uid not in [GLOBAL_SUBSCRIPTION_UID, FILTERED_SUBSCRIPTION_UID]:
+            # Get the workitem
+            workitem = service_provider.ServiceProvider.get_instance().workitem_repo.get_by_uid(workitem_uid)
+            if workitem:
+                # Create and queue the state report
+                state_report = create_ups_state_report(
+                    workitem.uid, workitem.ds.ProcedureStepState, workitem.ds.InputReadinessState
+                )
+                self.pending_notifications[ae_title].append(state_report)
+                self.logger.info(f"Queued state report for specific UPS {workitem_uid} to {ae_title}")
+
+        # For a global subscription with deletion lock
+        elif workitem_uid == GLOBAL_SUBSCRIPTION_UID and subscription.deletion_lock:
+            # Get all workitems
+            workitems = service_provider.ServiceProvider.get_instance().workitem_repo.get_all()
+            for workitem in workitems:
+                state_report = create_ups_state_report(
+                    workitem.uid, workitem.ds.ProcedureStepState, workitem.ds.InputReadinessState
+                )
+                self.pending_notifications[ae_title].append(state_report)
+            self.logger.info(f"Queued {len(workitems)} state reports for global subscription to {ae_title}")
+
+        # For filtered subscription, apply filter to get matching workitems
+        elif workitem_uid == FILTERED_SUBSCRIPTION_UID and subscription.filter:
+            workitems = service_provider.ServiceProvider.get_instance().workitem_repo.get_all()
+            queued_count = 0
+            for workitem in workitems:
+                if match_query_to_dataset(subscription.filter, workitem.ds):
+                    state_report = create_ups_state_report(
+                        workitem.uid, workitem.ds.ProcedureStepState, workitem.ds.InputReadinessState
+                    )
+                    self.pending_notifications[ae_title].append(state_report)
+                    queued_count += 1
+            self.logger.info(f"Queued {queued_count} state reports for filtered subscription to {ae_title}")
+        self.logger.info(f"Total pending notifications for {ae_title}: {len(self.pending_notifications[ae_title])}")
+
+    async def on_connection_established(self, subscriber_id: str) -> None:
+        """
+        Handle a new WebSocket connection event.
+
+        Args:
+            subscriber_id: The ID of the subscriber that established a connection.
+
+        """
+        if subscriber_id in self.pending_notifications and self.pending_notifications[subscriber_id]:
+            self.logger.info(
+                f"Sending {len(self.pending_notifications[subscriber_id])} pending notifications to {subscriber_id}"
+            )
+
+            # Send all pending notifications
+            pending_count = len(self.pending_notifications[subscriber_id])
+            sent_count = 0
+
+            for message in self.pending_notifications[subscriber_id]:
+                try:
+                    success = await self.connection_manager.send_message(subscriber_id, message.to_json())
+                    if success:
+                        sent_count += 1
+                except Exception as e:
+                    self.logger.error(f"Error sending pending notification to {subscriber_id}: {e}")
+
+            self.logger.info(f"Sent {sent_count}/{pending_count} pending notifications to {subscriber_id}")
+
+            # Clear the pending notifications for this subscriber
+            self.pending_notifications[subscriber_id] = []
 
     def notify_creation(self, workitem: WorkItem) -> None:
         """
         Send a notification for workitem creation.
 
-        See C.C.2.4.3 for expected  behavior.
-
-        Note that a UPS State Report should go out when a subscriber (first) subscribes for a specific UPS/workitem
-        or for any matching filtered workitem that is already present and being tracked.
-        Notification to a new subscriber about workitems that are present but already completed or canceled appears
-        to be optional.
-
+        Note that a UPS State Report should go out when a subscriber (first) subscribes for a specific UPS/workitem.
+        Not when the workitem is created/scheduled.  However, when the state *changes* (e.g. from SCHEDULED to IN PROGRESS),
+        a UPS State Report should be sent.
 
         Args:
             workitem: The created workitem.
 
         """
-        # event_report_message = create_ups_state_report(
-        #     workitem.uid,
-        #     workitem.ds.ProcedureStepState,
-        #     workitem.ds.InputReadinessState,
-        # )
-        # self._send_notification(workitem.uid, event_report_message)
-        if workitem.ds.ScheduledStationNameCodeSequence or workitem.ds.HumanPerformerCodeSequence:
-            self.logger.warning("Notifying of workitem creation")
-            event_report_message = create_ups_assigned_report(workitem.ds)
-            self._send_notification(workitem.uid, event_report_message)
+        event_report_message = create_ups_state_report(
+            workitem.uid,
+            workitem.ds.ProcedureStepState,
+            workitem.ds.InputReadinessState,
+        )
+        self._send_notification(workitem.uid, event_report_message)
+        event_report_message = create_ups_assigned_report(workitem.ds)
+        self._send_notification(workitem.uid, event_report_message)
 
     def _get_element_value_if_present(self, ds: Dataset, element_name: str) -> Any | None:  # noqa: ANN401
         element: DataElement = ds.get(element_name)

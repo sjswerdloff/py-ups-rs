@@ -1,6 +1,8 @@
 """Manager for WebSocket connections."""
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 import websockets
 
@@ -14,6 +16,20 @@ class ConnectionManager:
         self.subscriptions: dict[str, set[str]] = {}  # workitem_uid -> set of subscriber_ids
         self.subscriber_to_workitems: dict[str, set[str]] = {}  # subscriber_id -> set of workitem_uids
         self.logger = logging.getLogger("pyupsrs.websocket")
+        self.connection_callbacks: list[Callable[[str], None] | Callable[[str], Awaitable[None]]] = []
+
+    def register_connection_callback(self, callback: Callable[[str], None] | Callable[[str], Awaitable[None]]) -> None:
+        """
+        Register a callback to be called when a new connection is established.
+
+        Args:
+            callback: Function to call when a new connection is established.
+                     The function should accept a subscriber_id parameter.
+
+        """
+        self.connection_callbacks.append(callback)
+        callback_name = getattr(callback, "__name__", str(callback))  # for mocks
+        self.logger.info(f"Registered connection callback: {callback_name}")
 
     async def handle_connection(self, websocket: websockets.ServerConnection, subscriber_id: str) -> None:
         """
@@ -27,6 +43,17 @@ class ConnectionManager:
         self.connections[subscriber_id] = websocket
         self.logger.info(f"New connection from subscriber {subscriber_id}")
 
+        # Call all registered callbacks with the subscriber_id
+        for callback in self.connection_callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(subscriber_id)
+                else:
+                    callback(subscriber_id)
+                self.logger.debug(f"Successfully executed connection callback {callback.__name__} for {subscriber_id}")
+            except Exception as e:
+                self.logger.error(f"Error in connection callback {callback.__name__} for {subscriber_id}: {e}")
+
         try:
             # Keep the connection alive
             async for _message in websocket:
@@ -35,9 +62,10 @@ class ConnectionManager:
                 pass
         except websockets.exceptions.ConnectionClosed:
             self.logger.info(f"Connection closed from subscriber {subscriber_id}")
+            return
         finally:
             # Clean up when the connection is closed, but don't remove the subscriptions.
-            #  This is to allow for reactivation of the websocket connection itself (without there being a re-subscription).
+            # This is to allow for reactivation of the websocket connection itself (without there being a re-subscription).
             self.logger.debug(f"Removing websocket connection (only) when connection is closed for {subscriber_id}")
             del self.connections[subscriber_id]
 
