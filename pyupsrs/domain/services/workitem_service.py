@@ -1,8 +1,5 @@
 """Business logic for handling UPS workitems."""
 
-import logging
-import sys
-
 from pyupsrs.domain.models.ups import WorkItem, WorkItemStatus
 from pyupsrs.storage.repositories.workitem_repository import WorkItemRepository
 from pyupsrs.utils.class_logger import LoggerMixin
@@ -77,11 +74,15 @@ class WorkItemService(LoggerMixin):
             if hasattr(workitem.ds, "ProcedureStepState"):
                 current_status = workitem.ds.ProcedureStepState
             else:
-                self.logger.warning(f"ProcedureStepState not present in stored workitem {uid}, something went wrong when it was created?")
+                self.logger.warning(
+                    f"ProcedureStepState not present in stored workitem {uid}, something went wrong when it was created?"
+                )
                 return workitem, False
 
             if current_status not in ["SCHEDULED"] and (not transaction_uid or (workitem.transaction_uid != transaction_uid)):
-                self.logger.warning(f"Workitem {uid} was not in SCHEDULED state but transaction UID was not present or wrong value")
+                self.logger.warning(
+                    f"Workitem {uid} was not in SCHEDULED state but transaction UID was not present or wrong value"
+                )
                 return workitem, False
 
             if current_status in ["COMPLETED", "CANCELED"]:
@@ -106,7 +107,6 @@ class WorkItemService(LoggerMixin):
             self.logger.error(f"Problem while updating workitem status: {e}")
             raise e
         return updated_workitem, True
-
 
     def cancel_workitem(self, workitem: WorkItem) -> WorkItem:
         """
