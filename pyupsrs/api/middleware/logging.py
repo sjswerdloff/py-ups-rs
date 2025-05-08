@@ -2,7 +2,6 @@
 
 import logging
 import time
-from typing import Optional
 
 import falcon
 
@@ -27,7 +26,7 @@ class LoggingMiddleware:
         self.logger.info(f"Request: {req.method} {req.path}")
 
     async def process_response(
-        self, req: falcon.Request, resp: falcon.Response, resource: Optional[object], req_succeeded: bool
+        self, req: falcon.Request, resp: falcon.Response, resource: object | None, req_succeeded: bool
     ) -> None:
         """
         Process the response after routing.
