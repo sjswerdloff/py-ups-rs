@@ -108,14 +108,23 @@ class TestSubscriptionConnectionInterruption:
 
                 # Wait for the notification about the first workitem
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == workitem1_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == workitem1_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Filtered subscriber received UPS State Report for {workitem1_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Filtered subscriber received UPS Assigned for {workitem1_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
+
                 except TimeoutError as err:
                     raise AssertionError("No notification received for first workitem") from err
 
@@ -131,6 +140,28 @@ class TestSubscriptionConnectionInterruption:
                 await ws2.wait_ready()
                 assert ws2.ready, "Second WebSocket connection not ready"
 
+                # Existing UPS workitems will be notified on subscription, not on reconnection.
+                # # Verify that existing UPS workitems are sent on reconnection
+                # try:
+                #     for i in range(2):
+                #         # Set a reasonable timeout for the test
+                #         msg = await asyncio.wait_for(ws2.receive_json(), timeout=5.0)
+
+                #         # Verify the notification contains correct data
+                #         assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                #         assert msg["00001000"]["Value"][0] == workitem1_uid, "Incorrect workitem UID in notification"
+                #         assert "00741000" in msg, "Missing Procedure Step State in notification"
+                #         assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                #         event_type_id = msg["00001002"]["Value"][0]
+                #         if event_type_id == 1:  # UPS State Report
+                #             print(f"Filtered subscriber received UPS State Report for {workitem1_uid} in iteration {i}")
+                #         elif event_type_id == 5:  # UPS Assigned
+                #             print(f"Filtered subscriber received UPS Assigned for {workitem1_uid} in iteration {i}")
+                #         else:
+                #             raise AssertionError(f"Unexpected event type ID: {event_type_id}")
+                # except TimeoutError as err:
+                #     raise AssertionError("No notification received for existing workitem on reconnection") from err
+
                 # Create a second workitem after reconnection
                 response2 = await create_custom_workitem(conductor, sample_ups_workitem, priority="HIGH", state="SCHEDULED")
                 assert response2.status_code == 201
@@ -139,14 +170,22 @@ class TestSubscriptionConnectionInterruption:
 
                 # Wait for the notification about the second workitem on the new connection
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws2.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws2.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == workitem2_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == workitem2_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Filtered subscriber received UPS State Report for {workitem2_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Filtered subscriber received UPS Assigned for {workitem2_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for second workitem after reconnection") from err
 
@@ -173,5 +212,10 @@ class TestSubscriptionConnectionInterruption:
                     # Verify the notification contains correct state
                     assert "00741000" in msg, "Missing Procedure Step State in notification"
                     assert msg["00741000"]["Value"][0] == "IN PROGRESS", "Incorrect state in notification"
+                    event_type_id = msg["00001002"]["Value"][0]
+                    if event_type_id == 1:  # UPS State Report
+                        print(f"Filtered subscriber received UPS State Report for {workitem2_uid}")
+                    else:
+                        raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for state change after reconnection") from err

@@ -151,7 +151,7 @@ class TestMultipleSubscribers:
                     await filtered_ws.wait_ready()
                     assert filtered_ws.ready, "Filtered WebSocket connection not ready"
 
-                    # Create a new workitem (initially in SCHEDULED state)
+                    # Create a new workitem (initially in SCHEDULED state with a Scheduled Station)
                     new_workitem = deepcopy(sample_ups_workitem)
                     new_workitem["00080018"]["Value"] = [str(generate_uid())]
 
@@ -166,29 +166,52 @@ class TestMultipleSubscribers:
 
                     # Both subscribers should receive a notification about the new workitem (SCHEDULED state)
                     try:
-                        # Check global subscriber
-                        global_msg = await asyncio.wait_for(global_ws.receive_json(), timeout=5.0)
+                        for i in range(2):
+                            # Check global subscriber
+                            global_msg = await asyncio.wait_for(global_ws.receive_json(), timeout=5.0)
 
-                        # Verify the notification contains correct data
-                        assert "00001000" in global_msg, "Missing Affected SOP Instance UID in global notification"
-                        assert global_msg["00001000"]["Value"][0] == workitem_uid, (
-                            "Incorrect workitem UID in global notification"
-                        )
-                        assert "00741000" in global_msg, "Missing Procedure Step State in global notification"
-                        assert global_msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in global notification"
+                            # Verify the notification contains correct data
+                            assert "00001000" in global_msg, "Missing Affected SOP Instance UID in global notification"
+                            assert global_msg["00001000"]["Value"][0] == workitem_uid, (
+                                "Incorrect workitem UID in global notification"
+                            )
+                            assert "00741000" in global_msg, "Missing Procedure Step State in global notification"
+                            assert global_msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in global notification"
+                            assert "00001002" in global_msg, "Missing Event Type ID"
+                            event_type_id = global_msg["00001002"]["Value"][0]
+                            if event_type_id == 1:  # UPS State Report
+                                print(f"Global subscriber received UPS State Report for {workitem_uid} in iteration {i}")
+                            elif event_type_id == 5:  # UPS Assigned
+                                print(f"Global subscriber received UPS Assigned for {workitem_uid} in iteration {i}")
+                            else:
+                                raise AssertionError(f"Unexpected event type ID: {event_type_id}")
 
                         # Check filtered subscriber
-                        filtered_msg = await asyncio.wait_for(filtered_ws.receive_json(), timeout=5.0)
+                        for i in range(2):
+                            filtered_msg = await asyncio.wait_for(filtered_ws.receive_json(), timeout=5.0)
 
-                        # Verify the notification contains correct data
-                        assert "00001000" in filtered_msg, "Missing Affected SOP Instance UID in filtered notification"
-                        assert filtered_msg["00001000"]["Value"][0] == workitem_uid, (
-                            "Incorrect workitem UID in filtered notification"
-                        )
-                        assert "00741000" in filtered_msg, "Missing Procedure Step State in filtered notification"
-                        assert filtered_msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in filtered notification"
+                            # Verify the notification contains correct data
+                            assert "00001000" in filtered_msg, "Missing Affected SOP Instance UID in filtered notification"
+                            assert filtered_msg["00001000"]["Value"][0] == workitem_uid, (
+                                "Incorrect workitem UID in filtered notification"
+                            )
+                            assert "00741000" in filtered_msg, "Missing Procedure Step State in filtered notification"
+                            assert filtered_msg["00741000"]["Value"][0] == "SCHEDULED", (
+                                "Incorrect state in filtered notification"
+                            )
+                            assert "00001002" in filtered_msg, "Missing Event Type ID"
+                            event_type_id = filtered_msg["00001002"]["Value"][0]
+                            if event_type_id == 1:  # UPS State Report
+                                print(f"Filtered subscriber received UPS State Report for {workitem_uid} in iteration {i}")
+                            elif event_type_id == 5:  # UPS Assigned
+                                print(f"Filtered subscriber received UPS Assigned for {workitem_uid} in iteration {i}")
+                            else:
+                                raise AssertionError(f"Unexpected event type ID: {event_type_id}")
+
                     except TimeoutError as err:
-                        raise AssertionError("One or both subscribers did not receive notification for new workitem") from err
+                        raise AssertionError(
+                            "One or both subscribers did not receive both notifications for new workitem"
+                        ) from err
 
                     # Change workitem state to IN PROGRESS (only global subscriber should receive notification)
                     transaction_uid = str(generate_uid())

@@ -151,14 +151,22 @@ class TestGlobalSubscription:
 
                 # Wait for the notification about the new workitem
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == workitem_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == workitem_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Global subscriber received UPS State Report for {workitem_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Global subscriber received UPS Assigned for {workitem_uid} in iteration {i}")
+                        else:  # Unexpected event type
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for new workitem") from err
 

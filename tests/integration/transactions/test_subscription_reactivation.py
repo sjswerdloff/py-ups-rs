@@ -5,6 +5,7 @@ import json
 import uuid
 from copy import deepcopy
 from typing import Any
+from urllib.parse import urlencode
 
 import pytest
 from falcon import Response
@@ -104,7 +105,7 @@ class TestSubscriptionReactivation:
         7. Creates a third workitem and verifies notification is received again
         """
         # Create a unique subscriber AE title
-        aetitle = f"REACT_AE_{uuid.uuid4().hex[:6]}"  # AE Titles are limited to 16 characters
+        aetitle = f"REACT_AE_{uuid.uuid4().hex[:6]}"[:16]  # AE Titles are limited to 16 characters
 
         # Global subscription well-known UID
         global_uid = "1.2.840.10008.5.1.4.34.5"
@@ -147,14 +148,22 @@ class TestSubscriptionReactivation:
 
                 # Wait for the notification about the first workitem
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == first_workitem_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == first_workitem_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Global subscriber received UPS State Report for {first_workitem_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Global subscriber received UPS Assigned for {first_workitem_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for first workitem") from err
 
@@ -166,7 +175,8 @@ class TestSubscriptionReactivation:
 
                 # Create a second workitem - should NOT trigger notification due to suspended subscription
                 second_workitem = deepcopy(sample_ups_workitem)
-                second_workitem["00080018"]["Value"] = [str(generate_uid())]
+                second_workitem_uid = str(generate_uid())
+                second_workitem["00080018"]["Value"] = [second_workitem_uid]
 
                 response = await conductor.simulate_post(
                     "/workitems",
@@ -204,15 +214,77 @@ class TestSubscriptionReactivation:
 
                 third_workitem_uid = third_workitem["00080018"]["Value"][0]
 
-                # Wait for the notification about the third workitem
+                # Wait for the notification about the third workitem.
+                # The second item would only be sent if the deletion lock was true for the global subscriber
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == third_workitem_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        notified_workitem_uid = msg["00001000"]["Value"][0]
+                        if notified_workitem_uid not in [third_workitem_uid]:
+                            raise AssertionError(f"Incorrect workitem UID in notification {notified_workitem_uid}")
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Global subscriber received UPS State Report for {notified_workitem_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Global subscriber received UPS Assigned for {notified_workitem_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for third workitem after reactivation") from err
+
+                # Suspend the subscription again
+                response = await conductor.simulate_post(
+                    f"/workitems/{global_uid}/subscribers/{aetitle}/suspend", headers=dicom_headers
+                )
+                assert response.status_code == 200
+
+                # Reactivate the subscription by creating it again but with a deletionlock
+                params = {"deletionlock": "true"}
+
+                response = await conductor.simulate_post(
+                    f"/workitems/{global_uid}/subscribers/{aetitle}?{urlencode(params, doseq=True)}",
+                    headers={"Content-Type": "application/dicom+json"},
+                )
+                assert response.status_code == 201
+                assert "content-length" in response.headers  # just thought I would check, seems like falcon automates this
+
+                # close the connection so that we can open it again,
+                # because that's what triggers the sending of the queued state reports in this implementation of UPS-RS
+                # If the original websocket is not closed and a new one opened,
+                # the connection manager will not send the queued state reports
+                await ws.close()
+                ws_path = f"/ws/subscribers/{subscriber_id}"
+                async with conductor.simulate_ws(ws_path) as ws:
+                    # Verify connection is established
+                    await ws.wait_ready()
+                    assert ws.ready, "WebSocket connection not ready"
+
+                    try:
+                        for i in range(3):
+                            # Set a reasonable timeout for the test
+                            msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+
+                            # Verify the notification contains correct data
+                            assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                            notified_workitem_uid = msg["00001000"]["Value"][0]
+                            if notified_workitem_uid not in [first_workitem_uid, second_workitem_uid, third_workitem_uid]:
+                                raise AssertionError(f"Incorrect workitem UID in notification {notified_workitem_uid}")
+                            assert "00741000" in msg, "Missing Procedure Step State in notification"
+                            assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                            event_type_id = msg["00001002"]["Value"][0]
+                            if event_type_id == 1:  # UPS State Report
+                                print(
+                                    f"Global subscriber received UPS State Report for {notified_workitem_uid} in iteration {i}"
+                                )
+                            else:
+                                raise AssertionError(f"Unexpected event type ID: {event_type_id}")
+                    except TimeoutError as err:
+                        raise AssertionError(
+                            "Too few notifications received after reactivation of Global Subscription with deletionlock=true"
+                        ) from err

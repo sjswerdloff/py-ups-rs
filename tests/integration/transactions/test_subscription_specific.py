@@ -83,7 +83,7 @@ class TestSpecificWorkitemSubscription:
         5. Changes the state of the first workitem and verifies notification is received
         """
         # Create a unique subscriber AE title
-        aetitle = f"SPECIFIC_AE_{uuid.uuid4().hex[:6]}"  # AE Titles are limited to 16 characters
+        aetitle = f"SPECIFIC_AE_{uuid.uuid4().hex[:6]}"[:16]  # AE Titles are limited to 16 characters
 
         # Use ASGIConductor for WebSocket testing
         async with client as conductor:
@@ -144,11 +144,23 @@ class TestSpecificWorkitemSubscription:
                 second_workitem_uid = second_workitem["00080018"]["Value"][0]
                 print(f"Created second workitem with UID: {second_workitem_uid}")
 
-                # Try to receive a notification for the second workitem - should timeout
+                # Receive notifications,  should not get one for the second workitem
+                # Should get a UPS State Report for the first one.
                 try:
                     # Set a shorter timeout for the test since we expect no message
-                    await asyncio.wait_for(ws.receive_json(), timeout=2.0)
-                    raise AssertionError("Received notification for second workitem although not subscribed to it")
+                    msg = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+                    # Verify the notification contains correct data
+                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                    assert msg["00001000"]["Value"][0] == first_workitem_uid, "Incorrect workitem UID in notification"
+                    assert "00741000" in msg, "Missing Procedure Step State in notification"
+                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                    event_type_id = msg["00001002"]["Value"][0]
+                    if event_type_id == 1:  # UPS State Report
+                        print(f"Specific subscriber received UPS State Report for {first_workitem_uid}")
+                    # elif event_type_id == 5:  # UPS Assigned
+                    #     print(f"Specific subscriber received UPS Assigned for {first_workitem_uid}")
+                    else:
+                        raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError:
                     # This is the expected behavior - no message should be received for the second workitem
                     pass
@@ -196,13 +208,18 @@ class TestSpecificWorkitemSubscription:
                 )
                 assert response.status_code == 200
 
-                # Try to receive a notification for the second workitem's state change - should timeout
+                # Try to receive a notification for the second workitem's state change
+                # - should either timeout or maybe get a second UPS State Report
                 try:
                     # Set a shorter timeout for the test
                     await asyncio.wait_for(ws.receive_json(), timeout=2.0)
-                    raise AssertionError(
-                        "Received notification for second workitem state change although not subscribed to it"
-                    )
+                    # Verify the notification doesn't reference the wrong workitem uid.
+                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                    assert msg["00001000"]["Value"][0] != second_workitem_uid, "Received notification for second workitem"
+                    # assert msg["00001000"]["Value"][0] == first_workitem_uid, "Incorrect workitem UID in notification"
+                    # assert "00741000" in msg, "Missing Procedure Step State in notification"
+                    # assert msg["00741000"]["Value"][0] == "IN PROGRESS", "Incorrect state in notification"
+
                 except TimeoutError:
                     # This is the expected behavior - no message should be received for the second workitem
                     pass

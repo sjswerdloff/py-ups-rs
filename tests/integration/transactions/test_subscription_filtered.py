@@ -82,7 +82,6 @@ class TestFilteredSubscription:
         2. Establishes a WebSocket connection using the URL from the subscription response
         3. Creates a new workitem (SCHEDULED) and verifies a notification is received
         4. Changes the workitem state to IN PROGRESS and verifies NO notification is received
-        5. Changes the workitem state to COMPLETED and verifies notification is received
         """
         # Create a unique subscriber AE title
         aetitle = f"FILTER_AE_{uuid.uuid4().hex[:6]}"  # AE Titles are limited to 16 characters
@@ -145,14 +144,22 @@ class TestFilteredSubscription:
 
                 # Wait for the notification about the new workitem (SCHEDULED state - should be received)
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == workitem_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == workitem_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Filtered subscriber received UPS State Report for {workitem_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Filtered subscriber received UPS Assigned for {workitem_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for new workitem") from err
 

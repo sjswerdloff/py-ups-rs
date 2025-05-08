@@ -2,10 +2,10 @@
 
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-from pydicom import DataElement, Dataset
-from pydicom.datadict import keyword_for_tag, tag_for_keyword
+from pydicom import Dataset
+from pydicom.datadict import keyword_for_tag
 
 from pyupsrs.domain.models.ups import WorkItem
 from pyupsrs.utils.class_logger import LoggerMixin
@@ -42,7 +42,7 @@ class WorkItemRepository(LoggerMixin):
         local_store[workitem.uid] = workitem
         return workitem
 
-    def get_by_uid(self, uid: str) -> Optional[WorkItem]:
+    def get_by_uid(self, uid: str) -> WorkItem | None:
         """
         Get a workitem by UID.
 
@@ -126,7 +126,7 @@ class WorkItemRepository(LoggerMixin):
 
         """
         # TODO: Implement database retrieval
-        return deepcopy(local_store)
+        return deepcopy(list(local_store.values()))
 
     def get_filtered(
         self,

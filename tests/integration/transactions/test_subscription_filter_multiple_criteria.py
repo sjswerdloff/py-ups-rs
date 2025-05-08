@@ -39,6 +39,20 @@ def change_state_helper(client: TestClient, created_workitem_uid: str, transacti
     return client.simulate_put(location, body=payload_bytes, headers={"Content-Type": "application/dicom+json"})
 
 
+async def change_state_helper_async(
+    conductor: ASGIConductor, created_workitem_uid: str, transaction_uid: str, state: str
+) -> Response:
+    """Change a workitem state."""
+    # Prepare test data
+    payload = {"00081195": {"vr": "UI", "Value": [transaction_uid]}, "00741000": {"vr": "CS", "Value": [state]}}
+
+    location = f"/workitems/{created_workitem_uid}/state"
+    payload_bytes = json.dumps(payload).encode("utf-8")
+
+    # Send request
+    return await conductor.simulate_put(location, body=payload_bytes, headers={"Content-Type": "application/dicom+json"})
+
+
 @pytest.mark.asyncio(loop_scope="function")
 async def create_custom_workitem(
     conductor: ASGIConductor, base_workitem: dict[str, Any], priority: str = "MEDIUM", state: str = "SCHEDULED"
@@ -95,7 +109,7 @@ class TestFilteredSubscriptionMultipleCriteria:
         4. Verifies notifications are only received for workitems matching all filter criteria
         """
         # Create a unique subscriber AE title
-        aetitle = f"MULTI_FILTER_AE_{uuid.uuid4().hex[:6]}"[:16]  # AE Titles are limited to 16 characters
+        aetitle = f"MULFILTER_{uuid.uuid4().hex[:6]}"[:16]  # AE Titles are limited to 16 characters
 
         # Filtered subscription well-known UID
         filtered_uid = FILTERED_SUBSCRIPTION_UID
@@ -147,14 +161,22 @@ class TestFilteredSubscriptionMultipleCriteria:
 
                 # Wait for the notification about the first workitem
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == workitem1_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == workitem1_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Filtered subscriber received UPS State Report for {workitem1_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Filtered subscriber received UPS Assigned for {workitem1_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for workitem matching both criteria") from err
 
@@ -174,12 +196,17 @@ class TestFilteredSubscriptionMultipleCriteria:
                     # This is the expected behavior - no message should be received
                     pass
 
-                # Test Case 3: Create a workitem that matches only the PRIORITY criteria (IN PROGRESS + HIGH priority)
+                # Test Case 3: Change a workitem state so that it matches only
+                # the PRIORITY criteria (IN PROGRESS + HIGH priority)
                 # Should NOT receive notification
-                response3 = await create_custom_workitem(conductor, sample_ups_workitem, priority="HIGH", state="IN PROGRESS")
-                assert response3.status_code == 201
-                workitem3_uid = response3.json["00080018"]["Value"][0]
-                print(f"Created workitem 3 (matching only priority) with UID: {workitem3_uid}")
+                transaction_uid = str(generate_uid())
+                response3 = await change_state_helper_async(
+                    conductor, workitem1_uid, transaction_uid=transaction_uid, state="IN PROGRESS"
+                )
+                assert response3.status_code == 200
+                # workitem3_uid = response3.json["00080018"]["Value"][0]
+                # assert workitem3_uid == workitem1_uid, "Incorrect workitem UID in response"
+                # print(f"Created workitem 3 (matching only priority) with UID: {workitem3_uid}")
 
                 # Try to receive a notification for the third workitem - should timeout
                 try:
@@ -199,13 +226,21 @@ class TestFilteredSubscriptionMultipleCriteria:
 
                 # Wait for the notification about the fourth workitem
                 try:
-                    # Set a reasonable timeout for the test
-                    msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                    for i in range(2):
+                        # Set a reasonable timeout for the test
+                        msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
 
-                    # Verify the notification contains correct data
-                    assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
-                    assert msg["00001000"]["Value"][0] == workitem4_uid, "Incorrect workitem UID in notification"
-                    assert "00741000" in msg, "Missing Procedure Step State in notification"
-                    assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        # Verify the notification contains correct data
+                        assert "00001000" in msg, "Missing Affected SOP Instance UID in notification"
+                        assert msg["00001000"]["Value"][0] == workitem4_uid, "Incorrect workitem UID in notification"
+                        assert "00741000" in msg, "Missing Procedure Step State in notification"
+                        assert msg["00741000"]["Value"][0] == "SCHEDULED", "Incorrect state in notification"
+                        event_type_id = msg["00001002"]["Value"][0]
+                        if event_type_id == 1:  # UPS State Report
+                            print(f"Filtered subscriber received UPS State Report for {workitem4_uid} in iteration {i}")
+                        elif event_type_id == 5:  # UPS Assigned
+                            print(f"Filtered subscriber received UPS Assigned for {workitem4_uid} in iteration {i}")
+                        else:
+                            raise AssertionError(f"Unexpected event type ID: {event_type_id}")
                 except TimeoutError as err:
                     raise AssertionError("No notification received for second workitem matching both criteria") from err
