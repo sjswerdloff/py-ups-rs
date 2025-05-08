@@ -1,6 +1,5 @@
 """Serializers for converting between DICOM+JSON and internal models."""
 
-from datetime import datetime
 from typing import Any
 
 from pydicom import dataset

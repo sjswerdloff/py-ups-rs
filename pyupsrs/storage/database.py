@@ -3,7 +3,7 @@
 import contextlib
 import sqlite3
 from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any
 
 
 class Database:
@@ -74,7 +74,7 @@ class Database:
         finally:
             conn.close()
 
-    def execute(self, query: str, params: Optional[tuple[Any, ...]] = None) -> sqlite3.Cursor:
+    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> sqlite3.Cursor:
         """
         Execute a query.
 
@@ -92,7 +92,7 @@ class Database:
             conn.commit()
             return cursor
 
-    def fetch_one(self, query: str, params: Optional[tuple[Any, ...]] = None) -> Optional[dict[str, Any]]:
+    def fetch_one(self, query: str, params: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
         """
         Fetch a single row.
 
@@ -108,7 +108,7 @@ class Database:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def fetch_all(self, query: str, params: Optional[tuple[Any, ...]] = None) -> list[dict[str, Any]]:
+    def fetch_all(self, query: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
         """
         Fetch all rows.
 
