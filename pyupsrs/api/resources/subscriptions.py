@@ -173,6 +173,10 @@ class SubscriptionResource(LoggerMixin):
         # Log the generated WebSocket URL for debugging
         self.logger.warning(f"WebSocket URL converted to {ws_url}")
         resp.set_header("Content-Location", ws_url)
+        # After setting the header
+        self.logger.warning("Headers being set in response:")
+        for name, value in resp.headers.items():
+            self.logger.warning(f"  {name}: {value}")
 
     def _extract_original_request_info(self, req: falcon.Request) -> tuple[str, str, int]:
         """
