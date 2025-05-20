@@ -146,11 +146,20 @@ class SubscriptionResource(LoggerMixin):
         scheme, host, port = self._extract_original_request_info(req)
 
         # Get any path prefix from X-Forwarded-Prefix header
-        prefix = req.headers.get("X-Forwarded-Prefix", "")
+        prefix = (
+            req.headers.get("X-Forwarded-Prefix")
+            or req.headers.get("x-forwarded-prefix")
+            or req.headers.get("X-FORWARDED-PREFIX")
+            or req.prefix
+            or ""
+        )
         if prefix:
             self.logger.warning(f"WebSocket URL prefix is {prefix}")
         else:
             self.logger.warning("No WebSocket URL prefix")
+            self.logger.warning("All headers received:")
+            for key in req.headers.keys():
+                self.logger.warning(f"  {key} => {req.headers[key]}")
 
         # Switch protocol from http/https to ws/wss
         ws_protocol = "wss" if scheme == "https" else "ws"
