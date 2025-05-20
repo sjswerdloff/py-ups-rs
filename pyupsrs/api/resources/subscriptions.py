@@ -145,15 +145,20 @@ class SubscriptionResource(LoggerMixin):
         # Extract the original client-facing scheme, host and port
         scheme, host, port = self._extract_original_request_info(req)
 
+        # Get any path prefix from X-Forwarded-Prefix header
+        prefix = req.headers.get("X-Forwarded-Prefix", "")
+
         # Switch protocol from http/https to ws/wss
         ws_protocol = "wss" if scheme == "https" else "ws"
 
         # Construct the WebSocket URL - note that we don't include the port if it's standard
         if (ws_protocol == "ws" and port == 80) or (ws_protocol == "wss" and port == 443):
-            ws_url = f"{ws_protocol}://{host}/ws/subscribers/{aetitle}"
+            ws_url = f"{ws_protocol}://{host}{prefix}/ws/subscribers/{aetitle}"
         else:
-            ws_url = f"{ws_protocol}://{host}:{port}/ws/subscribers/{aetitle}"
+            ws_url = f"{ws_protocol}://{host}:{port}{prefix}/ws/subscribers/{aetitle}"
 
+        # Log the generated WebSocket URL for debugging
+        self.logger.info(f"WebSocket URL converted to {ws_url}")
         resp.set_header("Content-Location", ws_url)
 
     def _extract_original_request_info(self, req: falcon.Request) -> tuple[str, str, int]:
