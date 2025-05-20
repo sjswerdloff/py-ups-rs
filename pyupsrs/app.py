@@ -11,6 +11,7 @@ import falcon.asgi
 # import uvicorn
 from falcon.asgi import App
 from uvicorn.main import main as uvicorn_main
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware  # Import the middleware
 
 from pyupsrs.api.middleware.auth import AuthMiddleware
 from pyupsrs.api.middleware.logging import LoggingMiddleware
@@ -78,8 +79,11 @@ def create_app() -> App:
 
     # Register WebSocket route
     app.add_route("/ws/subscribers/{subscriber_id}", websocket_resource)
-
-    return app
+    #  Enable use of proxy headers so I can put Nginx in front of this
+    trusted_ips = ["127.0.0.1", "::1"]
+    final_app = ProxyHeadersMiddleware(app, trusted_hosts=trusted_ips)
+    logging.info("Proxy headers enabled for trusted IPs: %s", trusted_ips)
+    return final_app
 
 
 # Create a custom Click command that extends Uvicorn's CLI
@@ -108,6 +112,7 @@ def main(
     """
     # Get base configuration
     config = get_config()
+
     configure_logging(level=logging.getLevelNamesMapping()[str(config.log_level).upper()])
     # Update with command-line arguments if provided
     if database_uri is not None:
