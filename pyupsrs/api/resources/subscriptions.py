@@ -142,80 +142,98 @@ class SubscriptionResource(LoggerMixin):
             aetitle: The AE title of the subscriber.
 
         """
-        # Extract the original client-facing scheme, host and port
-        scheme, host, port = self._extract_original_request_info(req)
+        # Extract all request information in one central place
+        scheme, host, port, path_prefix, websocket_scheme = self._extract_original_request_info(req)
 
-        self.logger.warning("All headers received:")
-        for key in req.headers.keys():
-            self.logger.warning(f"  {key} => {req.headers[key]}")
-        # Get any path prefix from X-Forwarded-Prefix header
-        prefix = (
-            req.headers.get("X-Forwarded-Prefix")
-            or req.headers.get("x-forwarded-prefix")
-            or req.headers.get("X-FORWARDED-PREFIX")
-            or req.prefix
-            or ""
-        )
-        if prefix:
-            self.logger.warning(f"WebSocket URL prefix is {prefix}")
+        # Log information about WebSocket URL generation
+        if path_prefix:
+            self.logger.info(f"WebSocket URL prefix is {path_prefix}")
         else:
-            self.logger.warning("No WebSocket URL prefix")
+            self.logger.info("No WebSocket URL prefix")
 
-        # Switch protocol from http/https to ws/wss
-        ws_protocol = "wss" if scheme == "https" else "ws"
+        # Construct the WebSocket URL - include port unless it's standard
+        standard_port = (websocket_scheme == "ws" and port == 80) or (websocket_scheme == "wss" and port == 443)
 
-        # Construct the WebSocket URL - note that we don't include the port if it's standard
-        if (ws_protocol == "ws" and port == 80) or (ws_protocol == "wss" and port == 443):
-            ws_url = f"{ws_protocol}://{host}{prefix}/ws/subscribers/{aetitle}"
+        if standard_port:
+            ws_url = f"{websocket_scheme}://{host}{path_prefix}/ws/subscribers/{aetitle}"
         else:
-            ws_url = f"{ws_protocol}://{host}:{port}{prefix}/ws/subscribers/{aetitle}"
+            ws_url = f"{websocket_scheme}://{host}:{port}{path_prefix}/ws/subscribers/{aetitle}"
 
-        # Log the generated WebSocket URL for debugging
-        self.logger.warning(f"WebSocket URL converted to {ws_url}")
-        resp.set_header("Content-Location", ws_url)
-        # After setting the header
-        self.logger.warning("Headers being set in response:")
+        self.logger.info(f"WebSocket URL converted to {ws_url}")
+
+        # Set the header and log for debugging
+        resp.set_header("content-location", ws_url)
+
+        self.logger.debug("Headers being set in response:")
         for name, value in resp.headers.items():
-            self.logger.warning(f"  {name}: {value}")
+            self.logger.debug(f"  {name}: {value}")
 
-    def _extract_original_request_info(self, req: falcon.Request) -> tuple[str, str, int]:
+    def _extract_original_request_info(self, req: falcon.Request) -> tuple[str, str, int, str, str]:
         """
-        Extract the original client-facing scheme, host, and port from a proxied request.
+        Extract comprehensive client-facing request information from a proxied request.
+
+        When receiving a request through a reverse proxy (like Nginx), the original client
+        request information (scheme, host, port) is typically stored in X-Forwarded-* headers.
+        This method extracts this information to reconstruct the original client-facing URLs,
+        which is essential for generating correct WebSocket connection URLs.
+
+        The method prioritizes information in the following order:
+        1. X-Forwarded-* headers (for proxied requests)
+        2. Request object's native properties (for direct requests)
+        3. Sensible defaults based on the scheme
 
         Args:
-            req: The Falcon Request object.
+            req: The Falcon Request object containing HTTP headers and request information.
+                Expected headers include X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Port,
+                X-Forwarded-Prefix, and X-Websocket-Scheme.
 
         Returns:
-            Tuple containing (scheme, host, port)
+            A tuple containing five elements:
+            - scheme (str): The HTTP scheme used by the client ('http' or 'https')
+            - host (str): The hostname used by the client (e.g., 'localhost', 'example.com')
+            - port (int): The port number used by the client (e.g., 80, 443, 9080)
+            - path_prefix (str): Any path prefix from X-Forwarded-Prefix (e.g., '/dicom-web')
+            - websocket_scheme (str): The WebSocket scheme to use ('ws' or 'wss')
+
+        Notes:
+            - The method uses case-insensitive header lookups via Falcon's get_header method
+            - If X-Forwarded-Port is missing or invalid, it falls back to standard ports (80/443)
+            - If X-Websocket-Scheme is missing, it derives it from the HTTP scheme
+            (http → ws, https → wss)
+
+        Example:
+            When a client connects to https://example.com:9443/dicom-web/..., the method
+            would typically return:
+            ('https', 'example.com', 9443, '/dicom-web', 'wss')
 
         """
-        # Get scheme - prefer X-Forwarded-Proto if available
-        scheme = req.headers.get("X-Forwarded-Proto", req.scheme)
+        # Case-insensitive header lookups using Falcon's built-in method
+        scheme = req.get_header("X-Forwarded-Proto", default=req.scheme)
+        websocket_scheme = req.get_header("X-Websocket-Scheme") or ("wss" if scheme == "https" else "ws")
 
-        # Get host - prefer X-Forwarded-Host if available
-        forwarded_host = req.headers.get("X-Forwarded-Host")
+        forwarded_host = req.get_header("X-Forwarded-Host")
         host_with_port = forwarded_host or req.host
+
         # Extract host and port
         if ":" in host_with_port:
             host, port_str = host_with_port.split(":", 1)
             try:
                 port = int(port_str)
             except ValueError:
-                # Default ports if conversion fails
                 port = 443 if scheme == "https" else 80
         else:
             host = host_with_port
-            if forwarded_port := req.headers.get("X-Forwarded-Port"):
+            if forwarded_port := req.get_header("X-Forwarded-Port"):
                 try:
                     port = int(forwarded_port)
                 except ValueError:
-                    # Default ports if conversion fails
                     port = 443 if scheme == "https" else 80
             else:
-                # Use the standard ports if no specific port information
                 port = 443 if scheme == "https" else 80
 
-        return scheme, host, port
+        path_prefix = req.get_header("X-Forwarded-Prefix", default="")
+
+        return scheme, host, port, path_prefix, websocket_scheme
 
     async def on_delete(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str, aetitle: str) -> None:
         """
