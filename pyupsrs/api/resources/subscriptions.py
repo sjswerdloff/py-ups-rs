@@ -147,6 +147,10 @@ class SubscriptionResource(LoggerMixin):
 
         # Get any path prefix from X-Forwarded-Prefix header
         prefix = req.headers.get("X-Forwarded-Prefix", "")
+        if prefix:
+            self.logger.warning(f"WebSocket URL prefix is {prefix}")
+        else:
+            self.logger.warning("No WebSocket URL prefix")
 
         # Switch protocol from http/https to ws/wss
         ws_protocol = "wss" if scheme == "https" else "ws"
@@ -158,7 +162,7 @@ class SubscriptionResource(LoggerMixin):
             ws_url = f"{ws_protocol}://{host}:{port}{prefix}/ws/subscribers/{aetitle}"
 
         # Log the generated WebSocket URL for debugging
-        self.logger.info(f"WebSocket URL converted to {ws_url}")
+        self.logger.warning(f"WebSocket URL converted to {ws_url}")
         resp.set_header("Content-Location", ws_url)
 
     def _extract_original_request_info(self, req: falcon.Request) -> tuple[str, str, int]:
