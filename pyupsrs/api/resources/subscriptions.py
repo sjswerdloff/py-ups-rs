@@ -62,7 +62,7 @@ class SubscriptionSuspendResource(LoggerMixin):
             workitem_uid = GLOBAL_SUBSCRIPTION_UID
         elif FILTERED_SUBSCRIPTION_UID in path:
             workitem_uid = FILTERED_SUBSCRIPTION_UID
-        self.logger.warning(f"Attempting to suspend subscription for {aetitle} to {workitem_uid}")
+        self.logger.info(f"Attempting to suspend subscription for {aetitle} to {workitem_uid}")
         suspended = self.subscription_service.suspend(workitem_uid=workitem_uid, ae_title=aetitle)
 
         if not suspended:
@@ -108,9 +108,33 @@ class SubscriptionResource(LoggerMixin):
         parsed = urlparse(f"//{host_string}")
         return parsed.hostname or host_string
 
+    # def _add_websocket_url_header(self, req: falcon.Request, resp: falcon.Response, aetitle: str) -> None:
+    #     """
+    #     Add WebSocket connection URL to response headers.
+
+    #     Args:
+    #         req: The request object.
+    #         resp: The response object.
+    #         aetitle: The AE title of the subscriber.
+
+    #     """
+    #     # Get the base URI components
+    #     if req.url.startswith("https"):
+    #         ws_protocol = "wss"
+    #     else:
+    #         ws_protocol = "ws"
+    #         self.logger.warning(f"Using ws protocol for {req.url}")
+
+    #     req.uri
+    #     client_facing_host_and_port = req.url.netloc
+    #     ws_url = f"{ws_protocol}://{client_facing_host_and_port}/ws/subscribers/{aetitle}"
+    #     self.logger.info(f"WebSocket URL: {ws_url}")
+    #     resp.set_header("Content-Location", ws_url)
+    #     return
+
     def _add_websocket_url_header(self, req: falcon.Request, resp: falcon.Response, aetitle: str) -> None:
         """
-        Add WebSocket connection URL to response headers.
+        Add WebSocket connection URL to response headers that works through Nginx proxy.
 
         Args:
             req: The request object.
@@ -118,22 +142,58 @@ class SubscriptionResource(LoggerMixin):
             aetitle: The AE title of the subscriber.
 
         """
-        # Get the base URI components
-        scheme = req.scheme
-        host = self._extract_hostname(req.host)
-
-        port = req.port or (443 if scheme == "https" else 80)
-
-        # Get configured WebSocket port if available
-        ws_port = getattr(Config, "websocket_port", port)
+        # Extract the original client-facing scheme, host and port
+        scheme, host, port = self._extract_original_request_info(req)
 
         # Switch protocol from http/https to ws/wss
         ws_protocol = "wss" if scheme == "https" else "ws"
 
-        # Construct the WebSocket URL
-        ws_url = f"{ws_protocol}://{host}:{ws_port}/ws/subscribers/{aetitle}"
+        # Construct the WebSocket URL - note that we don't include the port if it's standard
+        if (ws_protocol == "ws" and port == 80) or (ws_protocol == "wss" and port == 443):
+            ws_url = f"{ws_protocol}://{host}/ws/subscribers/{aetitle}"
+        else:
+            ws_url = f"{ws_protocol}://{host}:{port}/ws/subscribers/{aetitle}"
 
         resp.set_header("Content-Location", ws_url)
+
+    def _extract_original_request_info(self, req: falcon.Request) -> tuple[str, str, int]:
+        """
+        Extract the original client-facing scheme, host, and port from a proxied request.
+
+        Args:
+            req: The Falcon Request object.
+
+        Returns:
+            Tuple containing (scheme, host, port)
+
+        """
+        # Get scheme - prefer X-Forwarded-Proto if available
+        scheme = req.headers.get("X-Forwarded-Proto", req.scheme)
+
+        # Get host - prefer X-Forwarded-Host if available
+        forwarded_host = req.headers.get("X-Forwarded-Host")
+        host_with_port = forwarded_host or req.host
+        # Extract host and port
+        if ":" in host_with_port:
+            host, port_str = host_with_port.split(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                # Default ports if conversion fails
+                port = 443 if scheme == "https" else 80
+        else:
+            host = host_with_port
+            if forwarded_port := req.headers.get("X-Forwarded-Port"):
+                try:
+                    port = int(forwarded_port)
+                except ValueError:
+                    # Default ports if conversion fails
+                    port = 443 if scheme == "https" else 80
+            else:
+                # Use the standard ports if no specific port information
+                port = 443 if scheme == "https" else 80
+
+        return scheme, host, port
 
     async def on_delete(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str, aetitle: str) -> None:
         """
