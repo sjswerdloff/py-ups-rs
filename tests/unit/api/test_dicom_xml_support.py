@@ -10,8 +10,8 @@ Tests verify:
 """
 
 import json
-from typing import Any
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydicom import Dataset
@@ -25,6 +25,9 @@ from pyupsrs.api.serializers.dicom_xml import (
     serialize_dataset,
     serialize_dataset_list,
 )
+
+if TYPE_CHECKING:
+    from pyupsrs.api.resources.workitems import DICOMJSONHandler
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -159,7 +162,8 @@ class TestDICOMXMLHandler:
         stream.read.return_value = xml_bytes
         sync_result = xml_handler.deserialize(stream, "application/dicom+xml", len(xml_bytes))
 
-        stream2 = MagicMock()
+        # deserialize_async uses ``await stream.read()``, so stream must be an AsyncMock
+        stream2 = AsyncMock()
         stream2.read.return_value = xml_bytes
         async_result = await xml_handler.deserialize_async(stream2, "application/dicom+xml", len(xml_bytes))
 
@@ -329,3 +333,66 @@ class TestDeserializeRequestBody:
         xml_bytes = to_xml(simple_dataset)
         result = deserialize_request_body(xml_bytes, "application/dicom+xml; charset=utf-8")
         assert isinstance(result, Dataset)
+
+
+# ---------------------------------------------------------------------------
+# DICOMJSONHandler async deserialization (regression for issue #5)
+# ---------------------------------------------------------------------------
+
+
+class TestDICOMJSONHandlerAsync:
+    """Regression tests for DICOMJSONHandler async deserialization path."""
+
+    @pytest.fixture()
+    def json_handler(self) -> "DICOMJSONHandler":
+        """Return a fresh DICOMJSONHandler instance."""
+        from pyupsrs.api.resources.workitems import DICOMJSONHandler  # local import avoids circular import
+
+        return DICOMJSONHandler()
+
+    @pytest.mark.asyncio
+    async def test_deserialize_async_returns_dict_for_valid_json(self, json_handler: "DICOMJSONHandler") -> None:
+        """Contract: deserialize_async returns a dict for valid DICOM JSON body."""
+        payload: dict[str, Any] = {"00100020": {"vr": "LO", "Value": ["PATIENT-001"]}}
+        body = json.dumps(payload).encode()
+
+        # deserialize_async uses ``await stream.read()``, so stream must be an AsyncMock
+        stream = AsyncMock()
+        stream.read.return_value = body
+
+        result = await json_handler.deserialize_async(stream, "application/dicom+json", len(body))
+
+        assert isinstance(result, dict)
+        assert "00100020" in result
+        assert result["00100020"]["Value"] == ["PATIENT-001"]
+
+    @pytest.mark.asyncio
+    async def test_deserialize_async_returns_empty_dict_for_empty_body(self, json_handler: "DICOMJSONHandler") -> None:
+        """Contract: deserialize_async returns empty dict when body is empty."""
+        stream = AsyncMock()
+        stream.read.return_value = b""
+
+        result = await json_handler.deserialize_async(stream, "application/dicom+json", 0)
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_deserialize_async_matches_sync_result(self, json_handler: "DICOMJSONHandler") -> None:
+        """Contract: async deserialize produces the same dict as sync deserialize."""
+        payload: dict[str, Any] = {
+            "00080016": {"vr": "UI", "Value": ["1.2.840.10008.5.1.4.34.6.1"]},
+            "00100020": {"vr": "LO", "Value": ["SYNC-ASYNC-MATCH"]},
+        }
+        body = json.dumps(payload).encode()
+
+        # Sync path
+        sync_stream = MagicMock()
+        sync_stream.read.return_value = body
+        sync_result = json_handler.deserialize(sync_stream, "application/dicom+json", len(body))
+
+        # Async path (uses await stream.read())
+        async_stream = AsyncMock()
+        async_stream.read.return_value = body
+        async_result = await json_handler.deserialize_async(async_stream, "application/dicom+json", len(body))
+
+        assert sync_result == async_result

@@ -30,7 +30,7 @@ class DICOMXMLHandler:
             The parsed Dataset.
 
         """
-        body = stream.read(content_length or 0)
+        body = stream.read()
         if not body:
             return Dataset()
         return from_xml(body)
@@ -55,6 +55,9 @@ class DICOMXMLHandler:
         """
         Deserialize the request body from application/dicom+xml (async).
 
+        Uses ``await stream.read()`` to consume the full body on ASGI without
+        blocking the event loop.
+
         Args:
             stream: The request body stream.
             content_type: The content type of the request.
@@ -64,7 +67,10 @@ class DICOMXMLHandler:
             The parsed Dataset.
 
         """
-        return self.deserialize(stream, content_type, content_length)
+        body = await stream.read()
+        if not body:
+            return Dataset()
+        return from_xml(body)
 
     async def serialize_async(self, media: Dataset | bytes, content_type: str) -> bytes:
         """
@@ -123,7 +129,10 @@ def serialize_dataset_list(datasets: list[Dataset], content_type: str) -> tuple[
     Serialize a list of Datasets to the negotiated format.
 
     For JSON: single JSON array of DICOM JSON objects.
-    For XML: concatenated XML documents, one per dataset, separated by newline.
+    For XML: each Dataset is serialized as a standalone XML document,
+    separated by newlines. Note: per PS3.18, multiple XML results should
+    use multipart/related framing. This simplified concatenation works
+    for single-result responses. Full multipart support is a future enhancement.
 
     Args:
         datasets: List of pydicom Datasets to serialize.

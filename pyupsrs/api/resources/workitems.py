@@ -4,6 +4,7 @@ import json
 import traceback
 from datetime import datetime
 from typing import Any
+from xml.etree import ElementTree as ET
 
 import falcon
 import falcon.request
@@ -108,7 +109,10 @@ class DICOMJSONHandler:
 
     async def deserialize_async(self, stream: BoundedStream, content_type: str, content_length: int) -> dict[str, Any]:
         """
-        Deserialize the request body from application/dicom+json.
+        Deserialize the request body from application/dicom+json (async).
+
+        Uses ``await stream.read()`` to consume the full body on ASGI without
+        blocking the event loop.
 
         Args:
             stream: The request body stream.
@@ -119,7 +123,8 @@ class DICOMJSONHandler:
             The parsed request body.
 
         """
-        return self.deserialize(stream, content_type, content_length)
+        body = await stream.read()
+        return json.loads(body) if body else {}
 
     async def serialize_async(self, media: dict[str, Any], content_type: str) -> bytes:
         """
@@ -211,7 +216,7 @@ class WorkItemsResource(LoggerMixin):
                 data, resp.content_type = serialize_dataset_list(dataset_list, resp.content_type)
             except Exception as e:
                 print(f"Failed to serialise result: {e}")
-                resp.status = falcon.HTTP_404
+                resp.status = falcon.HTTP_500
                 return
 
             if isinstance(data, bytes):
@@ -238,8 +243,14 @@ class WorkItemsResource(LoggerMixin):
             if not body:
                 raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM dataset is required")
 
-            # Parse the body based on content type
-            parsed = deserialize_request_body(body, req.content_type)
+            # Parse the body based on content type — return 400 for malformed input
+            try:
+                parsed = deserialize_request_body(body, req.content_type)
+            except (json.JSONDecodeError, ET.ParseError, Exception) as e:
+                raise falcon.HTTPBadRequest(
+                    title="Invalid request body",
+                    description=f"Request body must be valid DICOM JSON or XML: {e}",
+                ) from e
             if isinstance(parsed, Dataset):
                 workitem = WorkItem(ds=parsed)
             else:

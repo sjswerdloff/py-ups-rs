@@ -276,3 +276,34 @@ class TestRoundTripXmlJson:
         assert resp.status_code == 200
         retrieved_ds = from_xml(resp.content)
         assert retrieved_ds.PatientID == "XML-TEST-001"
+
+
+class TestInvalidRequestBodyReturns400:
+    """Tests for invalid request bodies returning HTTP 400 instead of 500."""
+
+    def test_post_workitem_invalid_json_returns_400(self, client: TestClient) -> None:
+        """Contract: POST /workitems with malformed JSON body returns 400 Bad Request."""
+        resp = client.simulate_post(
+            "/workitems",
+            body=b"{not valid json}",
+            headers={"Content-Type": "application/dicom+json"},
+        )
+        assert resp.status_code == 400
+
+    def test_post_workitem_invalid_xml_returns_400(self, client: TestClient) -> None:
+        """Contract: POST /workitems with malformed XML body returns 400 Bad Request."""
+        resp = client.simulate_post(
+            "/workitems",
+            body=b"<unclosed-tag>this is not valid XML",
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert resp.status_code == 400
+
+    def test_post_workitem_truncated_json_returns_400(self, client: TestClient) -> None:
+        """Contract: POST /workitems with truncated JSON body returns 400 Bad Request."""
+        resp = client.simulate_post(
+            "/workitems",
+            body=b'{"00080018": {"vr": "UI"',  # truncated, no closing braces
+            headers={"Content-Type": "application/dicom+json"},
+        )
+        assert resp.status_code == 400
