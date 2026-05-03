@@ -11,7 +11,7 @@ from typing import Any
 import falcon
 from falcon.asgi import BoundedStream
 from pydicom import Dataset
-from pydicom_xml import from_xml, to_xml
+from pydicom_xml import datasets_to_multipart_xml, from_xml, to_xml
 
 
 class DICOMXMLHandler:
@@ -144,15 +144,7 @@ def serialize_dataset_list(datasets: list[Dataset], content_type: str) -> tuple[
     if "xml" in content_type:
         if not datasets:
             return b"", "application/dicom+xml"
-        boundary = "dicom-xml-boundary"
-        parts = []
-        for ds in datasets:
-            xml_bytes = to_xml(ds)
-            part = (f"--{boundary}\r\nContent-Type: application/dicom+xml\r\n\r\n").encode() + xml_bytes + b"\r\n"
-            parts.append(part)
-        body = b"".join(parts) + f"--{boundary}--\r\n".encode()
-        multipart_content_type = f'multipart/related; type="application/dicom+xml"; boundary={boundary}'
-        return body, multipart_content_type
+        return datasets_to_multipart_xml(datasets)
     list_of_json = [ds.to_json() for ds in datasets]
     return "[" + ",".join(list_of_json) + "]", "application/dicom+json"
 

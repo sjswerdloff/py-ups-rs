@@ -246,7 +246,7 @@ class WorkItemsResource(LoggerMixin):
             # Parse the body based on content type — return 400 for malformed input
             try:
                 parsed = deserialize_request_body(body, req.content_type)
-            except (json.JSONDecodeError, ET.ParseError, Exception) as e:
+            except (json.JSONDecodeError, ET.ParseError, ValueError) as e:
                 self.logger.error("Failed to parse request body: %s", e)
                 raise falcon.HTTPBadRequest(
                     title="Invalid request body",
