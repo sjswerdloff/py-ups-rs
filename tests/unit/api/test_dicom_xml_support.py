@@ -41,8 +41,6 @@ def simple_dataset() -> Dataset:
     ds.file_meta = Dataset()
     ds.PatientName = "Test^Patient"
     ds.PatientID = "TEST-001"
-    ds.is_implicit_VR = False
-    ds.is_little_endian = True
     return ds
 
 
@@ -237,8 +235,6 @@ class TestSerializeDatasetList:
         ds2 = Dataset()
         ds2.PatientName = "Second^Patient"
         ds2.PatientID = "TEST-002"
-        ds2.is_implicit_VR = False
-        ds2.is_little_endian = True
         data, ct = serialize_dataset_list([simple_dataset, ds2], "application/dicom+json")
         parsed = json.loads(data)
         assert len(parsed) == 2
@@ -269,8 +265,6 @@ class TestSerializeDatasetList:
         ds2 = Dataset()
         ds2.PatientName = "Second^Patient"
         ds2.PatientID = "TEST-002"
-        ds2.is_implicit_VR = False
-        ds2.is_little_endian = True
         data, ct = serialize_dataset_list([simple_dataset, ds2], "application/dicom+xml")
         assert "multipart/related" in ct
         assert b"TEST-001" in data
