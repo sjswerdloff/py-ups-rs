@@ -17,6 +17,7 @@ dependencies = [
     "websockets>=15.0.1",
     "pydicom>=3.0.1",
     "httpx>=0.28.1",
+    "pydicom-xml",
 ]
 
 [project.optional-dependencies]
@@ -105,6 +106,9 @@ warn_unreachable = true
 module = ["tests.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+
+[tool.uv.sources]
+pydicom-xml = { git = "https://github.com/sjswerdloff/pydicom-xml" }
 
 [dependency-groups]
 dev = [
