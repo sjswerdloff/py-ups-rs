@@ -247,9 +247,10 @@ class WorkItemsResource(LoggerMixin):
             try:
                 parsed = deserialize_request_body(body, req.content_type)
             except (json.JSONDecodeError, ET.ParseError, Exception) as e:
+                self.logger.error("Failed to parse request body: %s", e)
                 raise falcon.HTTPBadRequest(
                     title="Invalid request body",
-                    description=f"Request body must be valid DICOM JSON or XML: {e}",
+                    description="Request body must be valid DICOM JSON or XML",
                 ) from e
             if isinstance(parsed, Dataset):
                 workitem = WorkItem(ds=parsed)
@@ -270,10 +271,15 @@ class WorkItemsResource(LoggerMixin):
                 resp.append_header("Warning", msg)
             else:
                 self.workitem_service.create_workitem(workitem=workitem)
-                workitem_response = {"00080018": {"Value": [workitem.ds.SOPInstanceUID], "vr": "UI"}}
+                # Build a minimal response Dataset with the created SOP Instance UID
+                response_ds = Dataset()
+                response_ds.SOPInstanceUID = workitem.ds.SOPInstanceUID
                 resp.status = falcon.HTTP_201
-                resp_media = json.dumps(workitem_response)
-                resp.text = resp_media
+                data, resp.content_type = serialize_dataset(response_ds, resp.content_type)
+                if isinstance(data, bytes):
+                    resp.data = data
+                else:
+                    resp.text = data
 
         except falcon.HTTPError:
             raise
