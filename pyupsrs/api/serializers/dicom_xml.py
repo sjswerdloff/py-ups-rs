@@ -148,13 +148,9 @@ def serialize_dataset_list(datasets: list[Dataset], content_type: str) -> tuple[
         parts = []
         for ds in datasets:
             xml_bytes = to_xml(ds)
-            part = (
-                f"--{boundary}\r\n"
-                f"Content-Type: application/dicom+xml\r\n"
-                f"\r\n"
-            ).encode("utf-8") + xml_bytes + b"\r\n"
+            part = (f"--{boundary}\r\nContent-Type: application/dicom+xml\r\n\r\n").encode() + xml_bytes + b"\r\n"
             parts.append(part)
-        body = b"".join(parts) + f"--{boundary}--\r\n".encode("utf-8")
+        body = b"".join(parts) + f"--{boundary}--\r\n".encode()
         multipart_content_type = f'multipart/related; type="application/dicom+xml"; boundary={boundary}'
         return body, multipart_content_type
     list_of_json = [ds.to_json() for ds in datasets]
