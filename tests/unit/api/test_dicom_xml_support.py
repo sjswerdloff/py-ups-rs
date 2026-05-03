@@ -255,7 +255,7 @@ class TestSerializeDatasetList:
         data, ct = serialize_dataset_list([simple_dataset], "application/dicom+xml")
         # Extract boundary from content type
         boundary = ct.split("boundary=")[1]
-        parts = data.split(f"--{boundary}".encode("utf-8"))
+        parts = data.split(f"--{boundary}".encode())
         # parts[0] is empty (before first boundary), parts[-1] is "--\r\n" (closing)
         xml_parts = [p for p in parts[1:-1] if p.strip()]
         assert len(xml_parts) == 1
@@ -277,7 +277,7 @@ class TestSerializeDatasetList:
         assert b"TEST-002" in data
         # Verify two parts
         boundary = ct.split("boundary=")[1]
-        parts = data.split(f"--{boundary}".encode("utf-8"))
+        parts = data.split(f"--{boundary}".encode())
         xml_parts = [p for p in parts[1:-1] if p.strip()]
         assert len(xml_parts) == 2
 

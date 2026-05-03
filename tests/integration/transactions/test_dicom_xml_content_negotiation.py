@@ -116,7 +116,7 @@ class TestGetWorkitemsXmlAccept:
         assert "multipart/related" in ct
         # Extract boundary and parse first part
         boundary = ct.split("boundary=")[1]
-        parts = resp.content.split(f"--{boundary}".encode("utf-8"))
+        parts = resp.content.split(f"--{boundary}".encode())
         xml_parts = [p for p in parts[1:-1] if p.strip()]
         assert len(xml_parts) >= 1
         xml_body = xml_parts[0].split(b"\r\n\r\n", 1)[1].strip()
@@ -264,7 +264,7 @@ class TestRoundTripXmlJson:
         # Extract boundary and parse first part
         ct = resp.headers["content-type"]
         boundary = ct.split("boundary=")[1]
-        parts = resp.content.split(f"--{boundary}".encode("utf-8"))
+        parts = resp.content.split(f"--{boundary}".encode())
         xml_parts = [p for p in parts[1:-1] if p.strip()]
         assert len(xml_parts) >= 1
         # Parse the XML body from the first part (after headers)
