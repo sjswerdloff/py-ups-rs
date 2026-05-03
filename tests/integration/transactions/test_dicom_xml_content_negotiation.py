@@ -139,9 +139,7 @@ class TestGetWorkitemsXmlAccept:
         parsed = json.loads(resp.text)
         assert isinstance(parsed, list)
 
-    def test_get_workitems_no_accept_defaults_to_json(
-        self, client: TestClient, base_workitem_json: dict[str, Any]
-    ) -> None:
+    def test_get_workitems_no_accept_defaults_to_json(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
         """Contract: GET /workitems with no Accept header defaults to JSON."""
         create_workitem_helper(client, base_workitem_json)
 
@@ -179,9 +177,7 @@ class TestGetWorkitemXmlAccept:
         ds = from_xml(resp.content)
         assert isinstance(ds, Dataset)
 
-    def test_get_workitem_json_accept_still_works(
-        self, client: TestClient, base_workitem_json: dict[str, Any]
-    ) -> None:
+    def test_get_workitem_json_accept_still_works(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
         """Contract: GET /workitems/{uid} with JSON Accept still returns JSON."""
         uid = _extract_sop_instance_uid_from_workitem(base_workitem_json)
         create_workitem_helper(client, base_workitem_json)
@@ -197,9 +193,7 @@ class TestGetWorkitemXmlAccept:
 class TestPostWorkitemXmlBody:
     """Tests for POST /workitems with XML Content-Type."""
 
-    def test_post_workitem_xml_body_returns_201(
-        self, client: TestClient, base_workitem_json: dict[str, Any]
-    ) -> None:
+    def test_post_workitem_xml_body_returns_201(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
         """Contract: POST /workitems with XML body creates a workitem (HTTP 201)."""
         # Build a Dataset from the JSON fixture, then convert to XML
         from pydicom.dataset import Dataset as PydcmDataset
@@ -239,9 +233,7 @@ class TestPostWorkitemXmlBody:
 class TestRoundTripXmlJson:
     """Round-trip tests: create with JSON, retrieve with XML; and vice versa."""
 
-    def test_create_json_retrieve_xml_round_trip(
-        self, client: TestClient, base_workitem_json: dict[str, Any]
-    ) -> None:
+    def test_create_json_retrieve_xml_round_trip(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
         """Contract: Workitem created with JSON can be retrieved and parsed as valid DICOM XML."""
         uid = _extract_sop_instance_uid_from_workitem(base_workitem_json)
         create_workitem_helper(client, base_workitem_json)
@@ -254,9 +246,7 @@ class TestRoundTripXmlJson:
         # PatientID should survive the round-trip
         assert ds.PatientID == "XML-TEST-001"
 
-    def test_create_json_retrieve_list_as_xml(
-        self, client: TestClient, base_workitem_json: dict[str, Any]
-    ) -> None:
+    def test_create_json_retrieve_list_as_xml(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
         """Contract: Workitem list created with JSON can be retrieved as valid DICOM XML."""
         create_workitem_helper(client, base_workitem_json)
 
@@ -268,9 +258,7 @@ class TestRoundTripXmlJson:
         ds = from_xml(first_doc)
         assert isinstance(ds, Dataset)
 
-    def test_create_xml_retrieve_xml_round_trip(
-        self, client: TestClient, base_workitem_json: dict[str, Any]
-    ) -> None:
+    def test_create_xml_retrieve_xml_round_trip(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
         """Contract: Workitem POSTed with XML body can be retrieved as XML with same patient data."""
         uid = _extract_sop_instance_uid_from_workitem(base_workitem_json)
         from pydicom.dataset import Dataset as PydcmDataset
