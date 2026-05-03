@@ -41,6 +41,7 @@ def falcon_app() -> App:
     from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionSuspendResource
     from pyupsrs.api.resources.websocket_resource import WebSocketResource
     from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
+    from pyupsrs.api.serializers.dicom_xml import DICOMXMLHandler
     from pyupsrs.config import get_config
     from pyupsrs.domain.services.service_provider import ServiceProvider
     from pyupsrs.utils.class_logger import configure_logging
@@ -72,11 +73,13 @@ def falcon_app() -> App:
     app.req_options.media_handlers.update(
         {
             "application/dicom+json": DICOMJSONHandler(),
+            "application/dicom+xml": DICOMXMLHandler(),
         }
     )
     app.resp_options.media_handlers.update(
         {
             "application/dicom+json": DICOMJSONHandler(),
+            "application/dicom+xml": DICOMXMLHandler(),
         }
     )
 

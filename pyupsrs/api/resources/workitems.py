@@ -4,6 +4,7 @@ import json
 import traceback
 from datetime import datetime
 from typing import Any
+from xml.etree import ElementTree as ET
 
 import falcon
 import falcon.request
@@ -12,6 +13,12 @@ from falcon.asgi import BoundedStream
 from pydicom import DataElement, Dataset, datadict
 
 from pyupsrs.api.serializers.dicom_json import deserialize_workitem
+from pyupsrs.api.serializers.dicom_xml import (
+    deserialize_request_body,
+    negotiate_content_type,
+    serialize_dataset,
+    serialize_dataset_list,
+)
 from pyupsrs.config import Config
 from pyupsrs.domain.models.ups import WorkItem, WorkItemStatus
 from pyupsrs.domain.services import workitem_service as svc_workitem_service
@@ -102,7 +109,10 @@ class DICOMJSONHandler:
 
     async def deserialize_async(self, stream: BoundedStream, content_type: str, content_length: int) -> dict[str, Any]:
         """
-        Deserialize the request body from application/dicom+json.
+        Deserialize the request body from application/dicom+json (async).
+
+        Uses ``await stream.read()`` to consume the full body on ASGI without
+        blocking the event loop.
 
         Args:
             stream: The request body stream.
@@ -113,7 +123,8 @@ class DICOMJSONHandler:
             The parsed request body.
 
         """
-        return self.deserialize()
+        body = await stream.read()
+        return json.loads(body) if body else {}
 
     async def serialize_async(self, media: dict[str, Any], content_type: str) -> bytes:
         """
@@ -197,18 +208,21 @@ class WorkItemsResource(LoggerMixin):
                 limit=limit,
             )
 
-        resp.content_type = "application/dicom+json"
+        resp.content_type = negotiate_content_type(req)
         if workitem_list and len(workitem_list) > 0 and workitem_list[0] is not None and workitem_list[0].ds is not None:
             dataset_list = [x.ds for x in workitem_list]
             resp.status = falcon.HTTP_200
-            json_response_text = ""
             try:
-                json_response_text = serialise_list_of_ds_to_json(dataset_list=dataset_list)
+                data, resp.content_type = serialize_dataset_list(dataset_list, resp.content_type)
             except Exception as e:
-                print(f"Failed to serialise result as json string: {e}")
-                resp.status = falcon.HTTP_404
+                print(f"Failed to serialise result: {e}")
+                resp.status = falcon.HTTP_500
+                return
 
-            resp.text = json_response_text
+            if isinstance(data, bytes):
+                resp.data = data
+            else:
+                resp.text = data
 
         else:
             resp.status = falcon.HTTP_404
@@ -227,18 +241,28 @@ class WorkItemsResource(LoggerMixin):
             base_uri = get_base_uri(req=req)
             body = await req.stream.read()
             if not body:
-                raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM JSON dataset is required")
+                raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM dataset is required")
 
-            # Parse the JSON body
+            # Parse the body based on content type — return 400 for malformed input
             try:
-                data = json.loads(body)
-            except json.JSONDecodeError as e:
-                raise falcon.HTTPBadRequest(title="Invalid JSON", description="Request body must be valid JSON") from e
+                parsed = deserialize_request_body(body, req.content_type)
+            except (json.JSONDecodeError, ET.ParseError, ValueError) as e:
+                self.logger.error("Failed to parse request body: %s", e)
+                raise falcon.HTTPBadRequest(
+                    title="Invalid request body",
+                    description="Request body must be valid DICOM JSON or XML",
+                ) from e
+            if isinstance(parsed, Dataset):
+                workitem = WorkItem(ds=parsed)
+            else:
+                try:
+                    workitem = deserialize_workitem(parsed)
+                except Exception as e:
+                    raise falcon.HTTPBadRequest(
+                        title="Invalid DICOM JSON", description="Request body must be valid DICOM JSON"
+                    ) from e
 
-            json_dicom = data
-            workitem = deserialize_workitem(json_dicom)
-
-            resp.content_type = "application/dicom+json"
+            resp.content_type = negotiate_content_type(req)
 
             if self.workitem_service.workitem_repository.get_by_uid(workitem.uid):
                 msg = f"Error: 299 {base_uri}: Can not create the workitem because the workitem UID: {workitem.uid} exists"
@@ -247,11 +271,18 @@ class WorkItemsResource(LoggerMixin):
                 resp.append_header("Warning", msg)
             else:
                 self.workitem_service.create_workitem(workitem=workitem)
-                workitem_response = {"00080018": {"Value": [workitem.ds.SOPInstanceUID], "vr": "UI"}}
+                # Build a minimal response Dataset with the created SOP Instance UID
+                response_ds = Dataset()
+                response_ds.SOPInstanceUID = workitem.ds.SOPInstanceUID
                 resp.status = falcon.HTTP_201
-                resp_media = json.dumps(workitem_response)
-                resp.text = resp_media
+                data, resp.content_type = serialize_dataset(response_ds, resp.content_type)
+                if isinstance(data, bytes):
+                    resp.data = data
+                else:
+                    resp.text = data
 
+        except falcon.HTTPError:
+            raise
         except Exception as e:
             # Get a detailed traceback for debugging on the server side
             print(traceback.format_exc())
@@ -292,18 +323,22 @@ class WorkItemResource(LoggerMixin):
         else:
             resp.status = falcon.HTTP_404
 
-        resp.content_type = "application/dicom+json"
+        resp.content_type = negotiate_content_type(req)
         if workitem is not None and workitem.ds is not None:
             resp.status = falcon.HTTP_200
-            json_response_text = ""
             try:
-                json_response_text = workitem.ds.to_json()
+                data, resp.content_type = serialize_dataset(workitem.ds, resp.content_type)
             except Exception as e:
                 # Get a detailed traceback for debugging on the server side
                 print(traceback.format_exc())
-                print(f"Failed to serialise result as json string: {e}")
+                print(f"Failed to serialise result: {e}")
+                resp.status = falcon.HTTP_500
+                return
 
-            resp.text = json_response_text
+            if isinstance(data, bytes):
+                resp.data = data
+            else:
+                resp.text = data
 
         else:
             resp.status = falcon.HTTP_404
