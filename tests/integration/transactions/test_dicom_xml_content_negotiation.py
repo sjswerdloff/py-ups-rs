@@ -106,14 +106,21 @@ class TestGetWorkitemsXmlAccept:
     def test_get_workitems_xml_accept_body_is_valid_dicom_xml(
         self, client: TestClient, base_workitem_json: dict[str, Any]
     ) -> None:
-        """Contract: GET /workitems with XML Accept returns parseable DICOM XML."""
+        """Contract: GET /workitems with XML Accept returns multipart/related with parseable parts."""
         create_workitem_helper(client, base_workitem_json)
 
         resp = client.simulate_get("/workitems", headers={"Accept": "application/dicom+xml"})
 
         assert resp.status_code == 200
-        # Should be parseable as DICOM XML
-        ds = from_xml(resp.content)
+        ct = resp.headers.get("content-type", "")
+        assert "multipart/related" in ct
+        # Extract boundary and parse first part
+        boundary = ct.split("boundary=")[1]
+        parts = resp.content.split(f"--{boundary}".encode("utf-8"))
+        xml_parts = [p for p in parts[1:-1] if p.strip()]
+        assert len(xml_parts) >= 1
+        xml_body = xml_parts[0].split(b"\r\n\r\n", 1)[1].strip()
+        ds = from_xml(xml_body)
         assert isinstance(ds, Dataset)
 
     def test_get_workitems_json_accept_returns_json_content_type(
@@ -247,15 +254,22 @@ class TestRoundTripXmlJson:
         assert ds.PatientID == "XML-TEST-001"
 
     def test_create_json_retrieve_list_as_xml(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:
-        """Contract: Workitem list created with JSON can be retrieved as valid DICOM XML."""
+        """Contract: Workitem list created with JSON can be retrieved as multipart/related XML."""
         create_workitem_helper(client, base_workitem_json)
 
         resp = client.simulate_get("/workitems", headers={"Accept": "application/dicom+xml"})
 
         assert resp.status_code == 200
-        # The first XML document (before any newline separator) should be parseable
-        first_doc = resp.content.split(b"\n<?xml")[0]
-        ds = from_xml(first_doc)
+        assert "multipart/related" in resp.headers.get("content-type", "")
+        # Extract boundary and parse first part
+        ct = resp.headers["content-type"]
+        boundary = ct.split("boundary=")[1]
+        parts = resp.content.split(f"--{boundary}".encode("utf-8"))
+        xml_parts = [p for p in parts[1:-1] if p.strip()]
+        assert len(xml_parts) >= 1
+        # Parse the XML body from the first part (after headers)
+        xml_body = xml_parts[0].split(b"\r\n\r\n", 1)[1].strip()
+        ds = from_xml(xml_body)
         assert isinstance(ds, Dataset)
 
     def test_create_xml_retrieve_xml_round_trip(self, client: TestClient, base_workitem_json: dict[str, Any]) -> None:

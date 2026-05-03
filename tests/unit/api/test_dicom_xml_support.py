@@ -243,30 +243,43 @@ class TestSerializeDatasetList:
         parsed = json.loads(data)
         assert len(parsed) == 2
 
-    def test_xml_single_dataset_returns_bytes(self, simple_dataset: Dataset) -> None:
-        """Contract: XML list serialization returns bytes."""
+    def test_xml_single_dataset_returns_multipart(self, simple_dataset: Dataset) -> None:
+        """Contract: XML list serialization returns multipart/related bytes."""
         data, ct = serialize_dataset_list([simple_dataset], "application/dicom+xml")
-        assert ct == "application/dicom+xml"
+        assert "multipart/related" in ct
+        assert "boundary=" in ct
         assert isinstance(data, bytes)
 
-    def test_xml_single_dataset_is_valid_dicom_xml(self, simple_dataset: Dataset) -> None:
-        """Contract: XML list result is parseable as DICOM XML."""
-        data, _ = serialize_dataset_list([simple_dataset], "application/dicom+xml")
-        # Single dataset → single XML document, parseable by from_xml
-        recovered = from_xml(data)
+    def test_xml_single_dataset_part_is_valid_dicom_xml(self, simple_dataset: Dataset) -> None:
+        """Contract: each part in XML multipart response is parseable as DICOM XML."""
+        data, ct = serialize_dataset_list([simple_dataset], "application/dicom+xml")
+        # Extract boundary from content type
+        boundary = ct.split("boundary=")[1]
+        parts = data.split(f"--{boundary}".encode("utf-8"))
+        # parts[0] is empty (before first boundary), parts[-1] is "--\r\n" (closing)
+        xml_parts = [p for p in parts[1:-1] if p.strip()]
+        assert len(xml_parts) == 1
+        # Extract XML body after the headers (double CRLF)
+        xml_body = xml_parts[0].split(b"\r\n\r\n", 1)[1].strip()
+        recovered = from_xml(xml_body)
         assert isinstance(recovered, Dataset)
 
-    def test_xml_multiple_datasets_contains_all_patient_ids(self, simple_dataset: Dataset) -> None:
-        """Contract: XML list of multiple datasets contains data from all datasets."""
+    def test_xml_multiple_datasets_multipart_contains_all(self, simple_dataset: Dataset) -> None:
+        """Contract: XML multipart response contains all datasets as separate parts."""
         ds2 = Dataset()
         ds2.PatientName = "Second^Patient"
         ds2.PatientID = "TEST-002"
         ds2.is_implicit_VR = False
         ds2.is_little_endian = True
-        data, _ = serialize_dataset_list([simple_dataset, ds2], "application/dicom+xml")
-        # Both patient IDs should appear in the concatenated output
+        data, ct = serialize_dataset_list([simple_dataset, ds2], "application/dicom+xml")
+        assert "multipart/related" in ct
         assert b"TEST-001" in data
         assert b"TEST-002" in data
+        # Verify two parts
+        boundary = ct.split("boundary=")[1]
+        parts = data.split(f"--{boundary}".encode("utf-8"))
+        xml_parts = [p for p in parts[1:-1] if p.strip()]
+        assert len(xml_parts) == 2
 
     def test_empty_list_json(self) -> None:
         """Contract: Empty list produces empty JSON array."""

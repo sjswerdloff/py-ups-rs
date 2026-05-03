@@ -129,24 +129,34 @@ def serialize_dataset_list(datasets: list[Dataset], content_type: str) -> tuple[
     Serialize a list of Datasets to the negotiated format.
 
     For JSON: single JSON array of DICOM JSON objects.
-    For XML: each Dataset is serialized as a standalone XML document,
-    separated by newlines. Note: per PS3.18, multiple XML results should
-    use multipart/related framing. This simplified concatenation works
-    for single-result responses. Full multipart support is a future enhancement.
+    For XML: multipart/related with one NativeDicomModel document per part,
+    per PS3.18 QIDO-RS response specification.
 
     Args:
         datasets: List of pydicom Datasets to serialize.
         content_type: The negotiated content type (json or xml).
 
     Returns:
-        A tuple of (serialized_data, content_type).
+        A tuple of (serialized_data, actual_content_type).
+        For XML, the content_type includes the multipart boundary.
 
     """
     if "xml" in content_type:
         if not datasets:
             return b"", "application/dicom+xml"
-        xml_parts = [to_xml(ds) for ds in datasets]
-        return b"\n".join(xml_parts), "application/dicom+xml"
+        boundary = "dicom-xml-boundary"
+        parts = []
+        for ds in datasets:
+            xml_bytes = to_xml(ds)
+            part = (
+                f"--{boundary}\r\n"
+                f"Content-Type: application/dicom+xml\r\n"
+                f"\r\n"
+            ).encode("utf-8") + xml_bytes + b"\r\n"
+            parts.append(part)
+        body = b"".join(parts) + f"--{boundary}--\r\n".encode("utf-8")
+        multipart_content_type = f'multipart/related; type="application/dicom+xml"; boundary={boundary}'
+        return body, multipart_content_type
     list_of_json = [ds.to_json() for ds in datasets]
     return "[" + ",".join(list_of_json) + "]", "application/dicom+json"
 
