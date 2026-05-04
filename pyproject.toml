@@ -124,6 +124,7 @@ pydicom-xml = { git = "https://github.com/sjswerdloff/pydicom-xml", rev = "06032
 
 [dependency-groups]
 dev = [
+    "mypy>=1.15.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
