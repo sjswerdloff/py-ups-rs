@@ -108,7 +108,7 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
 [tool.uv.sources]
-pydicom-xml = { git = "https://github.com/sjswerdloff/pydicom-xml", rev = "266cda9" }
+pydicom-xml = { git = "https://github.com/sjswerdloff/pydicom-xml", rev = "06032da" }
 
 [dependency-groups]
 dev = [

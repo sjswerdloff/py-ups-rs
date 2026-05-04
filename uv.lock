@@ -497,7 +497,7 @@ wheels = [
 [[package]]
 name = "pydicom-xml"
 version = "0.1.0"
-source = { git = "https://github.com/sjswerdloff/pydicom-xml?rev=266cda9#266cda95990130c85794c86baabc723c1c10502d" }
+source = { git = "https://github.com/sjswerdloff/pydicom-xml?rev=06032da#06032da7b7ef146fdd54a4dcac0f32bd417cac82" }
 dependencies = [
     { name = "pydicom" },
 ]
@@ -645,7 +645,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.2.0" },
     { name = "pydicom", specifier = ">=3.0.1" },
-    { name = "pydicom-xml", git = "https://github.com/sjswerdloff/pydicom-xml?rev=266cda9" },
+    { name = "pydicom-xml", git = "https://github.com/sjswerdloff/pydicom-xml?rev=06032da" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.5" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.26.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.1.1" },
