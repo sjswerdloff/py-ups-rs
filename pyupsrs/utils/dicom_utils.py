@@ -44,4 +44,4 @@ def to_dicom_date_str(date: datetime, vr: valuerep.VR = valuerep.VR.DA) -> str:
         str: The string representation for the specified date/time VR.
 
     """
-    return date.strftime(VR_STRFTIME.get(vr, VR_STRFTIME[valuerep.VR.DA]))
+    return date.strftime(VR_STRFTIME.get(vr, "%Y%m%d"))
