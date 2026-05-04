@@ -108,6 +108,12 @@ class WorkItemRepository(LoggerMixin):
         else:
             self.logger.warning("No Change Dataset in update")
 
+        # Sync non-dataset fields that the service layer may have updated directly
+        if workitem.transaction_uid is not None:
+            stored.transaction_uid = workitem.transaction_uid
+        if workitem.status != stored.status:
+            stored.status = workitem.status
+
         stored.updated_at = datetime.now()
         row = self._workitem_to_row(stored)
         self._db.execute(
