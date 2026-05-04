@@ -41,6 +41,34 @@ class TestCreate:
         assert len(result) == 1
         assert result[0].ae_title == "TEST_SCU"
 
+    def test_persists_suspended_flag(self, repo: SubscriptionRepository) -> None:
+        """Verify that suspended=True is preserved through storage."""
+        sub = Subscription(
+            workitem_uid=GLOBAL_SUBSCRIPTION_UID,
+            ae_title="SUSPENDED_SCU",
+            deletion_lock=False,
+            suspended=True,
+        )
+        repo.create(sub)
+        result = repo.get_by_workitem_and_ae_title(GLOBAL_SUBSCRIPTION_UID, "SUSPENDED_SCU")
+        assert len(result) == 1
+        assert result[0].suspended is True
+        assert result[0].deletion_lock is False
+
+    def test_persists_deletion_lock_flag(self, repo: SubscriptionRepository) -> None:
+        """Verify that deletion_lock=True is preserved through storage."""
+        sub = Subscription(
+            workitem_uid=GLOBAL_SUBSCRIPTION_UID,
+            ae_title="LOCKED_SCU",
+            deletion_lock=True,
+            suspended=False,
+        )
+        repo.create(sub)
+        result = repo.get_by_workitem_and_ae_title(GLOBAL_SUBSCRIPTION_UID, "LOCKED_SCU")
+        assert len(result) == 1
+        assert result[0].deletion_lock is True
+        assert result[0].suspended is False
+
     def test_create_replaces_suspended_equivalent(self, repo: SubscriptionRepository) -> None:
         """Verify that creating an active subscription replaces a suspended equivalent."""
         suspended = Subscription(

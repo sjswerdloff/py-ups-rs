@@ -237,10 +237,9 @@ class WorkItemRepository(LoggerMixin):
         matching_workitems = [wi for wi in all_workitems if wi.uid in uid_list]
         copy_of_workitems = deepcopy(matching_workitems)
 
-        include_keywords = [keyword_for_tag(int(kw, 16)) if kw.isnumeric() else kw for kw in include_field]
-        self.logger.warning(f"Includefield as keywords {include_keywords}")
-
         if include_field and "all" not in include_field:
+            include_keywords = [keyword_for_tag(int(kw, 16)) if kw.isnumeric() else kw for kw in include_field]
+            self.logger.warning(f"Includefield as keywords {include_keywords}")
             self.logger.warning(f"includefield was specified and will restrict content returned: {include_field}")
             for workitem in copy_of_workitems:
                 for elem in workitem.ds:
@@ -261,11 +260,11 @@ class WorkItemRepository(LoggerMixin):
             Dictionary with column names as keys.
 
         """
-        ds = workitem.ds
+        ds = workitem.ds or Dataset()
         return {
             "uid": workitem.uid,
             "status": workitem.status.value if isinstance(workitem.status, WorkItemStatus) else str(workitem.status),
-            "dataset_json": ds.to_json() if ds else "{}",
+            "dataset_json": ds.to_json() if workitem.ds else "{}",
             "created_at": workitem.created_at.isoformat() if workitem.created_at else datetime.now().isoformat(),
             "updated_at": workitem.updated_at.isoformat() if workitem.updated_at else None,
             "transaction_uid": workitem.transaction_uid,
