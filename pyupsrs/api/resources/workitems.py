@@ -351,15 +351,22 @@ class WorkItemResource(LoggerMixin):
         # Manually read and parse the request body
         body = await req.stream.read()
         if not body:
-            raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM JSON dataset is required")
+            raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM dataset is required")
 
-        # Parse the JSON body
+        # Parse the body based on content type (JSON or XML)
         try:
-            data = json.loads(body)
-        except json.JSONDecodeError as e:
-            raise falcon.HTTPBadRequest(title="Invalid JSON", description="Request body must be valid JSON") from e
+            parsed = deserialize_request_body(body, req.content_type)
+        except (json.JSONDecodeError, ET.ParseError, ValueError) as e:
+            self.logger.error("Failed to parse request body: %s", e)
+            raise falcon.HTTPBadRequest(
+                title="Invalid request body",
+                description="Request body must be valid DICOM JSON or XML",
+            ) from e
 
-        workitem_update = deserialize_workitem(data)
+        if isinstance(parsed, Dataset):
+            workitem_update = WorkItem(ds=parsed)
+        else:
+            workitem_update = deserialize_workitem(parsed)
 
         # Extract Procedure Step State (0074,1000)
         if hasattr(workitem_update.ds, "ProcedureStepState"):
@@ -507,21 +514,30 @@ class WorkItemStateResource(LoggerMixin):
         # Manually read and parse the request body
         body = await req.stream.read()
         if not body:
-            raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM JSON dataset is required")
+            raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM dataset is required")
 
-        # Parse the JSON body
+        # Parse the body based on content type (JSON or XML)
         try:
-            data = json.loads(body)
-        except json.JSONDecodeError as e:
-            raise falcon.HTTPBadRequest(title="Invalid JSON", description="Request body must be valid JSON") from e
+            change_state_request = deserialize_request_body(body, req.content_type)
+        except (json.JSONDecodeError, ET.ParseError, ValueError) as e:
+            self.logger.error("Failed to parse request body: %s", e)
+            raise falcon.HTTPBadRequest(
+                title="Invalid request body",
+                description="Request body must be valid DICOM JSON or XML",
+            ) from e
 
-        change_state_request = data
-
-        # Extract Procedure Step State (0074,1000)
+        # Extract Procedure Step State (0074,1000) and Transaction UID (0008,1195)
         procedure_step_state = None
         transaction_uid = None
 
-        if isinstance(change_state_request, dict):
+        if isinstance(change_state_request, Dataset):
+            # XML path: access via pydicom attribute access
+            if hasattr(change_state_request, "ProcedureStepState"):
+                procedure_step_state = str(change_state_request.ProcedureStepState)
+            if hasattr(change_state_request, "TransactionUID"):
+                transaction_uid = str(change_state_request.TransactionUID)
+        elif isinstance(change_state_request, dict):
+            # JSON path: access via DICOM tag keys
             # Extract Procedure Step State (0074,1000)
             if "00741000" in change_state_request and "Value" in change_state_request["00741000"]:
                 procedure_step_state = change_state_request["00741000"]["Value"][0]

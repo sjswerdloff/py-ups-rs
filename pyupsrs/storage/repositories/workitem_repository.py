@@ -16,6 +16,22 @@ from pyupsrs.utils.dicom_query_matcher import query_datasets
 class WorkItemRepository(LoggerMixin):
     """Repository for UPS workitems backed by SQLite."""
 
+    _COLUMNS: tuple[str, ...] = (
+        "uid",
+        "status",
+        "dataset_json",
+        "created_at",
+        "updated_at",
+        "transaction_uid",
+        "scheduled_start_time",
+        "scheduled_end_time",
+        "patient_name",
+        "patient_id",
+        "accession_number",
+        "procedure_step_type",
+        "procedure_code",
+    )
+
     def __init__(self, database: Database) -> None:
         """
         Initialize the repository.
@@ -25,6 +41,20 @@ class WorkItemRepository(LoggerMixin):
 
         """
         self._db = database
+
+    @classmethod
+    def _build_params(cls, row: dict[str, Any]) -> tuple[Any, ...]:
+        """
+        Extract column values from a row dict in canonical column order.
+
+        Args:
+            row: Dictionary mapping column names to values.
+
+        Returns:
+            Tuple of values in the order defined by ``_COLUMNS``.
+
+        """
+        return tuple(row[col] for col in cls._COLUMNS)
 
     def create(self, workitem: WorkItem) -> WorkItem:
         """
@@ -38,28 +68,11 @@ class WorkItemRepository(LoggerMixin):
 
         """
         row = self._workitem_to_row(workitem)
+        columns_sql = ", ".join(self._COLUMNS)
+        placeholders = ", ".join("?" * len(self._COLUMNS))
         self._db.execute(
-            """INSERT INTO workitems
-               (uid, status, dataset_json, created_at, updated_at,
-                transaction_uid, scheduled_start_time, scheduled_end_time,
-                patient_name, patient_id, accession_number,
-                procedure_step_type, procedure_code)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                row["uid"],
-                row["status"],
-                row["dataset_json"],
-                row["created_at"],
-                row["updated_at"],
-                row["transaction_uid"],
-                row["scheduled_start_time"],
-                row["scheduled_end_time"],
-                row["patient_name"],
-                row["patient_id"],
-                row["accession_number"],
-                row["procedure_step_type"],
-                row["procedure_code"],
-            ),
+            f"INSERT INTO workitems ({columns_sql}) VALUES ({placeholders})",
+            self._build_params(row),
         )
         return workitem
 
@@ -116,27 +129,12 @@ class WorkItemRepository(LoggerMixin):
 
         stored.updated_at = datetime.now()
         row = self._workitem_to_row(stored)
+        set_columns = [col for col in self._COLUMNS if col != "uid"]
+        set_clause = ", ".join(f"{col} = ?" for col in set_columns)
+        set_params = tuple(row[col] for col in set_columns)
         self._db.execute(
-            """UPDATE workitems SET
-               status = ?, dataset_json = ?, updated_at = ?,
-               transaction_uid = ?, scheduled_start_time = ?,
-               scheduled_end_time = ?, patient_name = ?, patient_id = ?,
-               accession_number = ?, procedure_step_type = ?, procedure_code = ?
-               WHERE uid = ?""",
-            (
-                row["status"],
-                row["dataset_json"],
-                row["updated_at"],
-                row["transaction_uid"],
-                row["scheduled_start_time"],
-                row["scheduled_end_time"],
-                row["patient_name"],
-                row["patient_id"],
-                row["accession_number"],
-                row["procedure_step_type"],
-                row["procedure_code"],
-                row["uid"],
-            ),
+            f"UPDATE workitems SET {set_clause} WHERE uid = ?",
+            (*set_params, row["uid"]),
         )
         return stored
 
@@ -171,25 +169,11 @@ class WorkItemRepository(LoggerMixin):
             self.logger.error(f"Unable to find workitem to cancel: {uid}")
             return False
 
-        stored.updated_at = datetime.now()
         stored.status = cancel_workitem.status
         if cancel_workitem.ds:
             stored.ds.update(cancel_workitem.ds)
 
-        row = self._workitem_to_row(stored)
-        self._db.execute(
-            """UPDATE workitems SET
-               status = ?, dataset_json = ?, updated_at = ?,
-               transaction_uid = ?
-               WHERE uid = ?""",
-            (
-                row["status"],
-                row["dataset_json"],
-                row["updated_at"],
-                row["transaction_uid"],
-                row["uid"],
-            ),
-        )
+        self.update(stored)
         return True
 
     def get_all(self) -> list[WorkItem]:

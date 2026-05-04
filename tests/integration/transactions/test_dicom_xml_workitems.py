@@ -6,6 +6,9 @@ Verifies that the server correctly handles ``application/dicom+xml`` for:
 - GET workitem list / search (Accept: application/dicom+xml → multipart/related)
 - POST a new workitem with an XML body (Content-Type: application/dicom+xml)
 - Round-trip: POST as JSON, GET as XML, verify patient data survives
+- PUT update workitem with XML body (Content-Type: application/dicom+xml)
+- PUT state change with XML body (Content-Type: application/dicom+xml)
+- Error paths in workitem service
 
 All tests use the ``client`` and ``created_workitem_uid`` fixtures from conftest.py.
 
@@ -25,7 +28,7 @@ import pytest
 from falcon.testing.client import TestClient
 from pydicom import Dataset
 from pydicom.uid import generate_uid
-from pydicom_xml import from_xml, to_xml
+from pydicom_xml import dataset_to_xml, from_xml, to_xml
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -468,3 +471,258 @@ class TestXmlPostWithXmlAccept:
         recovered = from_xml(result.content)
         assert isinstance(recovered, Dataset)
         assert str(recovered.SOPInstanceUID) == uid
+
+
+# ---------------------------------------------------------------------------
+# PUT update workitem with XML body
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestXmlPutUpdateWorkitem:
+    """PUT /workitems/{uid} with Content-Type: application/dicom+xml updates the workitem."""
+
+    def test_put_xml_update_returns_200(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: PUT with a valid XML body and correct Content-Type returns HTTP 200."""
+        update_ds = Dataset()
+        update_ds.ScheduledProcedureStepStartDateTime = "20250601120000"
+        update_ds.ScheduledProcedureStepExpirationDateTime = "20250601130000"
+        xml_body = dataset_to_xml(update_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 200
+
+    def test_put_xml_update_is_reflected_in_get(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: after XML PUT, the updated scheduled time is retrievable via GET."""
+        scheduled_start = "20250701090000"
+        update_ds = Dataset()
+        update_ds.ScheduledProcedureStepStartDateTime = scheduled_start
+        xml_body = dataset_to_xml(update_ds)
+
+        put_result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert put_result.status_code == 200
+
+        get_result = client.simulate_get(
+            f"/workitems/{created_workitem_uid}",
+            headers={"Accept": "application/dicom+json"},
+        )
+        assert get_result.status_code == 200
+        payload = json.loads(get_result.text)
+        # ScheduledProcedureStepStartDateTime tag 00404005
+        assert payload["00404005"]["Value"] == [scheduled_start]
+
+    def test_put_xml_update_empty_body_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: PUT with empty body and XML Content-Type returns HTTP 400."""
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}",
+            body=b"",
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 400
+
+    def test_put_xml_update_malformed_xml_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: PUT with malformed XML body and XML Content-Type returns HTTP 400."""
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}",
+            body=b"<NotValidXML>",
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 400
+
+    def test_put_xml_update_nonexistent_workitem_returns_404(self, client: TestClient) -> None:
+        """Contract: PUT XML update for a non-existent workitem UID returns HTTP 404."""
+        update_ds = Dataset()
+        update_ds.ScheduledProcedureStepStartDateTime = "20250601120000"
+        xml_body = dataset_to_xml(update_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{generate_uid()}",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 404
+
+    def test_put_xml_update_strips_procedure_step_state_with_warning(
+        self, client: TestClient, created_workitem_uid: str
+    ) -> None:
+        """Contract: PUT with ProcedureStepState in XML body returns 200 with a 299 warning header."""
+        update_ds = Dataset()
+        update_ds.ProcedureStepState = "IN PROGRESS"
+        update_ds.ScheduledProcedureStepStartDateTime = "20250601120000"
+        xml_body = dataset_to_xml(update_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 200
+        warning_header = result.headers.get("Warning", "")
+        assert "299" in warning_header
+
+
+# ---------------------------------------------------------------------------
+# PUT state change with XML body
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestXmlPutStateChange:
+    """PUT /workitems/{uid}/state with Content-Type: application/dicom+xml changes workitem state."""
+
+    def test_put_xml_state_change_to_in_progress_returns_200(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: XML PUT state change to IN PROGRESS returns HTTP 200."""
+        transaction_uid = str(generate_uid())
+        state_ds = Dataset()
+        state_ds.ProcedureStepState = "IN PROGRESS"
+        state_ds.TransactionUID = transaction_uid
+        xml_body = dataset_to_xml(state_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}/state",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 200
+
+    def test_put_xml_state_change_to_completed_returns_200(
+        self, client: TestClient, in_progress_workitem_uid: tuple[str, str]
+    ) -> None:
+        """Contract: XML PUT state change to COMPLETED on an in-progress workitem returns HTTP 200."""
+        workitem_uid, transaction_uid = in_progress_workitem_uid
+        state_ds = Dataset()
+        state_ds.ProcedureStepState = "COMPLETED"
+        state_ds.TransactionUID = transaction_uid
+        xml_body = dataset_to_xml(state_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{workitem_uid}/state",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 200
+
+    def test_put_xml_state_change_empty_body_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: XML PUT state change with empty body returns HTTP 400."""
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}/state",
+            body=b"",
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 400
+
+    def test_put_xml_state_change_malformed_xml_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: XML PUT state change with malformed XML body returns HTTP 400."""
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}/state",
+            body=b"<broken",
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Error path tests for workitem service
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestWorkitemServiceErrorPaths:
+    """Error path tests verifying the workitem service returns correct status codes."""
+
+    def test_state_change_on_nonexistent_workitem_returns_error(self, client: TestClient) -> None:
+        """Contract: state change PUT on a nonexistent workitem returns an error response (404)."""
+        nonexistent_uid = str(generate_uid())
+        transaction_uid = str(generate_uid())
+        payload = {
+            "00081195": {"vr": "UI", "Value": [transaction_uid]},
+            "00741000": {"vr": "CS", "Value": ["IN PROGRESS"]},
+        }
+        result = client.simulate_put(
+            f"/workitems/{nonexistent_uid}/state",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/dicom+json"},
+        )
+        assert result.status_code == 404
+
+    def test_state_change_missing_transaction_uid_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: state change PUT without TransactionUID returns HTTP 400."""
+        payload = {
+            "00741000": {"vr": "CS", "Value": ["IN PROGRESS"]},
+        }
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}/state",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/dicom+json"},
+        )
+        assert result.status_code == 400
+
+    def test_state_change_with_wrong_transaction_uid_on_claimed_workitem_returns_400(
+        self, client: TestClient, in_progress_workitem_uid: tuple[str, str]
+    ) -> None:
+        """Contract: state change with incorrect TransactionUID on a claimed workitem returns HTTP 400."""
+        workitem_uid, _correct_transaction_uid = in_progress_workitem_uid
+        wrong_transaction_uid = str(generate_uid())
+        payload = {
+            "00081195": {"vr": "UI", "Value": [wrong_transaction_uid]},
+            "00741000": {"vr": "CS", "Value": ["COMPLETED"]},
+        }
+        result = client.simulate_put(
+            f"/workitems/{workitem_uid}/state",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/dicom+json"},
+        )
+        assert result.status_code == 400
+
+    def test_xml_state_change_on_nonexistent_workitem_returns_error(self, client: TestClient) -> None:
+        """Contract: XML state change PUT on a nonexistent workitem returns an error response (404)."""
+        nonexistent_uid = str(generate_uid())
+        state_ds = Dataset()
+        state_ds.ProcedureStepState = "IN PROGRESS"
+        state_ds.TransactionUID = str(generate_uid())
+        xml_body = dataset_to_xml(state_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{nonexistent_uid}/state",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 404
+
+    def test_xml_state_change_missing_transaction_uid_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+        """Contract: XML state change PUT with ProcedureStepState but no TransactionUID returns HTTP 400."""
+        state_ds = Dataset()
+        state_ds.ProcedureStepState = "IN PROGRESS"
+        xml_body = dataset_to_xml(state_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{created_workitem_uid}/state",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 400
+
+    def test_xml_state_change_wrong_transaction_uid_on_claimed_workitem_returns_400(
+        self, client: TestClient, in_progress_workitem_uid: tuple[str, str]
+    ) -> None:
+        """Contract: XML state change with wrong TransactionUID on a claimed workitem returns HTTP 400."""
+        workitem_uid, _correct_transaction_uid = in_progress_workitem_uid
+        state_ds = Dataset()
+        state_ds.ProcedureStepState = "COMPLETED"
+        state_ds.TransactionUID = str(generate_uid())
+        xml_body = dataset_to_xml(state_ds)
+
+        result = client.simulate_put(
+            f"/workitems/{workitem_uid}/state",
+            body=xml_body,
+            headers={"Content-Type": "application/dicom+xml"},
+        )
+        assert result.status_code == 400

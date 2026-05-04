@@ -55,17 +55,26 @@ class SubscriptionRepository(LoggerMixin):
 
     def _discard_suspended_equivalent(self, subscription: Subscription) -> None:
         """Remove any existing suspended subscription for the same workitem/AE pair."""
-        self.logger.warning(f"Checking for suspended equivalent for {subscription}")
-        existing = self.get_by_workitem_and_ae_title(subscription.workitem_uid, subscription.ae_title)
-        if existing:
-            self.logger.warning(f"Current {existing} contains equivalent for requested {subscription}")
-            for existing_sub in existing:
-                if existing_sub.suspended:
-                    self.logger.warning(f"Discarding suspended equivalent {existing_sub}")
-                    self._db.execute(
-                        "DELETE FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ? AND suspended = 1",
-                        (existing_sub.workitem_uid, existing_sub.ae_title),
-                    )
+        self.logger.warning(f"Checking for suspended equivalent for {subscription}; discarding any suspended match")
+        self._db.execute(
+            "DELETE FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ? AND suspended = 1",
+            (subscription.workitem_uid, subscription.ae_title),
+        )
+
+    def _fetch_subscriptions(self, sql: str, params: tuple) -> list[Subscription]:
+        """
+        Fetch subscriptions using sql and params, mapping each row to a Subscription.
+
+        Args:
+            sql: The SQL query to execute.
+            params: The parameters to bind to the query.
+
+        Returns:
+            List of Subscription objects.
+
+        """
+        rows = self._db.fetch_all(sql, params)
+        return [self._row_to_subscription(row) for row in rows]
 
     def get_by_workitem_and_ae_title(self, workitem_uid: str, ae_title: str) -> list[Subscription]:
         """
@@ -79,11 +88,10 @@ class SubscriptionRepository(LoggerMixin):
             List of matching subscriptions.
 
         """
-        rows = self._db.fetch_all(
+        return self._fetch_subscriptions(
             "SELECT * FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ?",
             (workitem_uid, ae_title),
         )
-        return [self._row_to_subscription(row) for row in rows]
 
     def get_by_ae_title(self, ae_title: str) -> list[Subscription]:
         """
@@ -96,11 +104,10 @@ class SubscriptionRepository(LoggerMixin):
             List of matching subscriptions.
 
         """
-        rows = self._db.fetch_all(
+        return self._fetch_subscriptions(
             "SELECT * FROM subscriptions WHERE subscriber_uid = ?",
             (ae_title,),
         )
-        return [self._row_to_subscription(row) for row in rows]
 
     def get_by_workitem(self, workitem_uid: str) -> list[Subscription]:
         """
@@ -113,11 +120,10 @@ class SubscriptionRepository(LoggerMixin):
             List of matching subscriptions.
 
         """
-        rows = self._db.fetch_all(
+        return self._fetch_subscriptions(
             "SELECT * FROM subscriptions WHERE workitem_uid = ?",
             (workitem_uid,),
         )
-        return [self._row_to_subscription(row) for row in rows]
 
     def delete(self, workitem_uid: str, ae_title: str) -> bool:
         """
