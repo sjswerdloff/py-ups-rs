@@ -1,5 +1,6 @@
 """Unit tests for WorkItemService covering all branches."""
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -75,16 +76,19 @@ class TestCreateWorkitem:
     def test_create_workitem_without_notification_service_logs_warning(
         self,
         mock_repository: MagicMock,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Contract: create_workitem skips notification and logs warning when service is None (line 46)."""
         workitem = _make_workitem()
         mock_repository.create.return_value = workitem
         service = _make_service(mock_repository, notification_service=None)
 
-        result = service.create_workitem(workitem)
+        with caplog.at_level(logging.WARNING):
+            result = service.create_workitem(workitem)
 
-        # No notification service means no notify call — just logs and returns
         assert result is workitem
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warning_records, "Expected a WARNING log when notification_service is None"
 
     def test_create_workitem_returns_repository_result(
         self,
@@ -260,6 +264,7 @@ class TestUpdateWorkitemStatus:
     def test_update_without_notification_service_logs_warning(
         self,
         mock_repository: MagicMock,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Contract: successful update without notification service logs warning (line 105)."""
         workitem = _make_workitem(status="SCHEDULED")
@@ -267,10 +272,13 @@ class TestUpdateWorkitemStatus:
         mock_repository.update.return_value = workitem
         service = _make_service(mock_repository, notification_service=None)
 
-        result_workitem, success = service.update_workitem_status("1.2.3.4.5", WorkItemStatus.IN_PROGRESS, "txn-001")
+        with caplog.at_level(logging.WARNING):
+            result_workitem, success = service.update_workitem_status("1.2.3.4.5", WorkItemStatus.IN_PROGRESS, "txn-001")
 
         assert success is True
         assert result_workitem is workitem
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("notification" in r.getMessage().lower() for r in warning_records)
 
     def test_update_in_progress_stores_transaction_uid(
         self,

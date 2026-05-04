@@ -10,6 +10,7 @@ Tests verify:
 - CLI accepts --database-uri and --auth / --no-auth flags
 """
 
+import os
 from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
@@ -23,17 +24,6 @@ from pyupsrs.config import Config
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_EXPECTED_ROUTES = [
-    "/workitems/1.2.840.10008.5.1.4.34.5/subscribers/{aetitle}/suspend",
-    "/workitems/1.2.840.10008.5.1.4.34.5.1/subscribers/{aetitle}/suspend",
-    "/workitems/{workitem_uid}/subscribers/{aetitle}",
-    "/workitems/{workitem_uid}/state",
-    "/workitems/{workitem_uid}/cancelrequest",
-    "/workitems/{workitem_uid}",
-    "/workitems",
-    "/ws/subscribers/{subscriber_id}",
-]
 
 
 def _make_mock_service_provider() -> MagicMock:
@@ -190,38 +180,47 @@ class TestMainCli:
         runner = CliRunner()
         sentinel_uri = "sqlite:///test_smoke.db"
 
-        with (
-            patch("pyupsrs.app.uvicorn_main"),
-            patch("pyupsrs.app.get_config", return_value=Config()),
-            patch("pyupsrs.app.configure_logging"),
-        ):
-            result = runner.invoke(main, ["--database-uri", sentinel_uri])
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PYUPSRS_DATABASE_URI", None)
+            with (
+                patch("pyupsrs.app.uvicorn_main"),
+                patch("pyupsrs.app.get_config", return_value=Config()),
+                patch("pyupsrs.app.configure_logging"),
+            ):
+                result = runner.invoke(main, ["--database-uri", sentinel_uri])
 
-        # The CLI sets the env var before calling uvicorn; CliRunner isolates env by
-        # default only if mix_env=False (the default), so we verify via exit code and
-        # the absence of an unhandled exception.
+            assert os.environ.get("PYUPSRS_DATABASE_URI") == sentinel_uri
+
         assert result.exception is None or isinstance(result.exception, SystemExit)
 
     def test_cli_no_auth_flag(self) -> None:
-        """Contract: --no-auth flag is accepted without error."""
+        """Contract: --no-auth flag sets PYUPSRS_AUTH_ENABLED to 'false'."""
         runner = CliRunner()
-        with (
-            patch("pyupsrs.app.uvicorn_main"),
-            patch("pyupsrs.app.get_config", return_value=Config()),
-            patch("pyupsrs.app.configure_logging"),
-        ):
-            result = runner.invoke(main, ["--no-auth"])
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PYUPSRS_AUTH_ENABLED", None)
+            with (
+                patch("pyupsrs.app.uvicorn_main"),
+                patch("pyupsrs.app.get_config", return_value=Config()),
+                patch("pyupsrs.app.configure_logging"),
+            ):
+                result = runner.invoke(main, ["--no-auth"])
+
+            assert os.environ.get("PYUPSRS_AUTH_ENABLED") == "false"
 
         assert result.exception is None or isinstance(result.exception, SystemExit)
 
     def test_cli_auth_flag(self) -> None:
-        """Contract: --auth flag is accepted without error."""
+        """Contract: --auth flag sets PYUPSRS_AUTH_ENABLED to 'true'."""
         runner = CliRunner()
-        with (
-            patch("pyupsrs.app.uvicorn_main"),
-            patch("pyupsrs.app.get_config", return_value=Config()),
-            patch("pyupsrs.app.configure_logging"),
-        ):
-            result = runner.invoke(main, ["--auth"])
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PYUPSRS_AUTH_ENABLED", None)
+            with (
+                patch("pyupsrs.app.uvicorn_main"),
+                patch("pyupsrs.app.get_config", return_value=Config()),
+                patch("pyupsrs.app.configure_logging"),
+            ):
+                result = runner.invoke(main, ["--auth"])
+
+            assert os.environ.get("PYUPSRS_AUTH_ENABLED") == "true"
 
         assert result.exception is None or isinstance(result.exception, SystemExit)
