@@ -108,24 +108,15 @@ class WorkItemService(LoggerMixin):
             raise e
         return updated_workitem, True
 
-    def cancel_workitem(self, workitem: WorkItem) -> WorkItem:
+    def cancel_workitem(self, workitem: WorkItem) -> tuple[WorkItem, bool]:
         """
-        Create a new workitem.
+        Cancel a workitem by transitioning it to CANCELED state.
 
         Args:
-            workitem: The workitem to create.
+            workitem: The workitem to cancel.
 
         Returns:
-            The created workitem.
+            A tuple of (updated workitem, success).
 
         """
-        # Save to repository
-        created_workitem = self.workitem_repository.create(workitem)
-
-        # Send notification
-        if self.notification_service:
-            self.notification_service.notify_creation(created_workitem)
-        else:
-            self.logger.warning("Notification Service not injected, no notifications will be sent")
-
-        return created_workitem
+        return self.update_workitem_status(workitem.uid, WorkItemStatus.CANCELED, transaction_uid=workitem.transaction_uid)

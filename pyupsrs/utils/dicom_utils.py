@@ -18,18 +18,18 @@ def generate_uid() -> str:
     return uid.generate_uid()
 
 
-def validate_uid(uid: str) -> bool:
+def validate_uid(dicom_uid: str) -> bool:
     """
     Validate a DICOM UID.
 
     Args:
-        uid: The UID to validate.
+        dicom_uid: The UID to validate.
 
     Returns:
         True if valid, False otherwise.
 
     """
-    return uid.UID(uid).is_valid
+    return uid.UID(dicom_uid).is_valid
 
 
 def to_dicom_date_str(date: datetime, vr: valuerep.VR = valuerep.VR.DA) -> str:
@@ -44,4 +44,4 @@ def to_dicom_date_str(date: datetime, vr: valuerep.VR = valuerep.VR.DA) -> str:
         str: The string representation for the specified date/time VR.
 
     """
-    return date.strftime(VR_STRFTIME.get(vr, default=valuerep.VR.DA))
+    return date.strftime(VR_STRFTIME.get(vr, VR_STRFTIME[valuerep.VR.DA]))
