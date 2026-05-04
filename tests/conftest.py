@@ -17,7 +17,7 @@ from falcon.asgi import App
 from falcon.testing import TestClient
 from pydicom.uid import generate_uid
 
-from pyupsrs.storage.repositories.workitem_repository import local_store
+from pyupsrs.domain.services.service_provider import ServiceProvider
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -34,6 +34,11 @@ def falcon_app() -> App:
         and middleware configured.
 
     """
+    import os
+
+    # Use in-memory database for tests
+    os.environ["PYUPSRS_DATABASE_URI"] = ":memory:"
+
     # Needs to be kept in sync with the actual api/app.py for the server.
     # might be better to just launch the app via script?
     from pyupsrs.api.middleware.auth import AuthMiddleware
@@ -111,8 +116,10 @@ def falcon_app() -> App:
 
 @pytest.fixture(scope="function", autouse=True)
 def reset_workitem_repository() -> None:
-    """Reset the workitem repository in the service provider before each test."""
-    local_store.clear()
+    """Reset the database tables before each test for isolation."""
+    provider = ServiceProvider.get_instance()
+    provider.database.execute("DELETE FROM subscriptions")
+    provider.database.execute("DELETE FROM workitems")
 
 
 # @pytest.fixture(scope="class", autouse=True)

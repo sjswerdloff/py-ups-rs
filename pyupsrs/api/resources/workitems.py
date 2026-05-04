@@ -19,12 +19,10 @@ from pyupsrs.api.serializers.dicom_xml import (
     serialize_dataset,
     serialize_dataset_list,
 )
-from pyupsrs.config import Config
 from pyupsrs.domain.models.ups import WorkItem, WorkItemStatus
 from pyupsrs.domain.services import workitem_service as svc_workitem_service
-from pyupsrs.storage.repositories import workitem_repository
+from pyupsrs.domain.services.service_provider import ServiceProvider
 from pyupsrs.utils.class_logger import LoggerMixin
-from pyupsrs.websocket import notification_service as svc_notification_service
 
 UPS_WARNING_MODIFICATIONS = "Warning: 299 {service}: The Workitem was updated with modifications."
 UPS_WARNING_URI_UNCLAIMED_WORKITEM = "Warning: 299 {service}: The target URI did not reference a claimed Workitem."
@@ -154,12 +152,8 @@ class WorkItemsResource(LoggerMixin):
         """
         self.workitem_service = workitem_service
         if not self.workitem_service:
-            workitem_crud = workitem_repository.WorkItemRepository(database_uri=Config.database_uri)
-            notification_communication_manager = svc_notification_service.ConnectionManager()
-            notification_backend = svc_notification_service.NotificationService(notification_communication_manager)
-            self.workitem_service = svc_workitem_service.WorkItemService(
-                workitem_repository=workitem_crud, notification_service=notification_backend
-            )
+            provider = ServiceProvider.get_instance()
+            self.workitem_service = provider.workitem_service
 
     async def on_get(self, req: falcon.Request, resp: falcon.Response) -> None:
         """
@@ -303,10 +297,8 @@ class WorkItemResource(LoggerMixin):
         """
         self.workitem_service = workitem_service
         if not self.workitem_service:
-            workitem_crud = workitem_repository.WorkItemRepository(database_uri=Config.database_uri)
-            self.workitem_service = svc_workitem_service.WorkItemService(
-                workitem_repository=workitem_crud, notification_service=None
-            )
+            provider = ServiceProvider.get_instance()
+            self.workitem_service = provider.workitem_service
 
     async def on_get(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """
@@ -482,10 +474,8 @@ class WorkItemStateResource(LoggerMixin):
         """
         self.workitem_service = workitem_service
         if not self.workitem_service:
-            workitem_crud = workitem_repository.WorkItemRepository(database_uri=Config.database_uri)
-            self.workitem_service = svc_workitem_service.WorkItemService(
-                workitem_repository=workitem_crud, notification_service=None
-            )
+            provider = ServiceProvider.get_instance()
+            self.workitem_service = provider.workitem_service
 
     async def on_get(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """

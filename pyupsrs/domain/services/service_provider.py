@@ -2,10 +2,12 @@
 
 import logging
 
-from pyupsrs.config import Config
+from pyupsrs.config import get_config
 from pyupsrs.domain.services import subscription_service as svc_subscription_service
 from pyupsrs.domain.services import workitem_service as svc_workitem_service
-from pyupsrs.storage.repositories import subscription_repository, workitem_repository
+from pyupsrs.storage.database import Database
+from pyupsrs.storage.repositories.subscription_repository import SubscriptionRepository
+from pyupsrs.storage.repositories.workitem_repository import WorkItemRepository
 from pyupsrs.websocket.connection_manager import ConnectionManager
 from pyupsrs.websocket.notification_service import NotificationService
 
@@ -37,9 +39,11 @@ class ServiceProvider:
         self.connection_manager = ConnectionManager()
         self.notification_service = NotificationService(self.connection_manager)
 
-        # Initialize repositories
-        self.workitem_repo = workitem_repository.WorkItemRepository(database_uri=Config.database_uri)
-        self.subscription_repo = subscription_repository.SubscriptionRepository(database_uri=Config.database_uri)
+        # Initialize database and repositories
+        config = get_config()
+        self.database = Database(config.database_uri)
+        self.workitem_repo = WorkItemRepository(database=self.database)
+        self.subscription_repo = SubscriptionRepository(database=self.database)
 
         # Initialize domain services
         self.workitem_service = svc_workitem_service.WorkItemService(

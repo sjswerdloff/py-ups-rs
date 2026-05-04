@@ -5,10 +5,9 @@ from urllib.parse import urlparse
 import falcon
 from pydicom import DataElement, Dataset, datadict
 
-from pyupsrs.config import Config
 from pyupsrs.domain.models.ups import FILTERED_SUBSCRIPTION_UID, GLOBAL_SUBSCRIPTION_UID, Subscription
 from pyupsrs.domain.services import subscription_service as svc_subscription_service
-from pyupsrs.storage.repositories import subscription_repository
+from pyupsrs.domain.services.service_provider import ServiceProvider
 from pyupsrs.utils.class_logger import LoggerMixin
 
 
@@ -25,8 +24,8 @@ class SubscriptionSuspendResource(LoggerMixin):
         """
         self.subscription_service = subscription_service
         if not self.subscription_service:
-            subscription_crud = subscription_repository.SubscriptionRepository(database_uri=Config.database_uri)
-            self.subscription_service = svc_subscription_service.SubscriptionService(subscription_repository=subscription_crud)
+            provider = ServiceProvider.get_instance()
+            self.subscription_service = provider.subscription_service
 
     async def on_get(self, req: falcon.Request, resp: falcon.Response, aetitle: str) -> None:
         """
@@ -84,8 +83,8 @@ class SubscriptionResource(LoggerMixin):
         """
         self.subscription_service = subscription_service
         if not self.subscription_service:
-            subscription_crud = subscription_repository.SubscriptionRepository(database_uri=Config.database_uri)
-            self.subscription_service = svc_subscription_service.SubscriptionService(subscription_repository=subscription_crud)
+            provider = ServiceProvider.get_instance()
+            self.subscription_service = provider.subscription_service
 
     def _extract_hostname(self, host_string: str) -> str:
         """
