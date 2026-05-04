@@ -40,25 +40,19 @@ class TestSchemaInitialization:
     def test_creates_workitems_table(self) -> None:
         """Verify that the workitems table exists after initialization."""
         db = Database(":memory:")
-        row = db.fetch_one(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='workitems'"
-        )
+        row = db.fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='workitems'")
         assert row is not None
 
     def test_creates_subscriptions_table(self) -> None:
         """Verify that the subscriptions table exists after initialization."""
         db = Database(":memory:")
-        row = db.fetch_one(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='subscriptions'"
-        )
+        row = db.fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='subscriptions'")
         assert row is not None
 
     def test_creates_schema_version_table(self) -> None:
         """Verify that the schema_version table exists after initialization."""
         db = Database(":memory:")
-        row = db.fetch_one(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
-        )
+        row = db.fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")
         assert row is not None
 
     def test_schema_version_recorded(self) -> None:
@@ -70,17 +64,13 @@ class TestSchemaInitialization:
     def test_workitems_has_dataset_json_column(self) -> None:
         """Verify that the workitems table includes a dataset_json column."""
         db = Database(":memory:")
-        row = db.fetch_one(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='workitems'"
-        )
+        row = db.fetch_one("SELECT sql FROM sqlite_master WHERE type='table' AND name='workitems'")
         assert "dataset_json" in row["sql"]
 
     def test_indexes_created(self) -> None:
         """Verify that all expected indexes are created on initialization."""
         db = Database(":memory:")
-        rows = db.fetch_all(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'"
-        )
+        rows = db.fetch_all("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
         index_names = {r["name"] for r in rows}
         assert "idx_workitems_status" in index_names
         assert "idx_workitems_patient_id" in index_names
@@ -114,7 +104,7 @@ class TestMigrations:
         db1 = Database(db_path)
         db1.execute(
             "INSERT INTO workitems (uid, status, dataset_json, created_at) VALUES (?, ?, ?, ?)",
-            ("1.2.3.4", "SCHEDULED", '{}', "2026-01-01T00:00:00"),
+            ("1.2.3.4", "SCHEDULED", "{}", "2026-01-01T00:00:00"),
         )
         # Restart
         db2 = Database(db_path)
@@ -152,11 +142,11 @@ class TestConnectionManagement:
         db = Database(":memory:")
         db.execute(
             "INSERT INTO workitems (uid, status, dataset_json, created_at) VALUES (?, ?, ?, ?)",
-            ("uid-1", "SCHEDULED", '{}', "2026-01-01"),
+            ("uid-1", "SCHEDULED", "{}", "2026-01-01"),
         )
         db.execute(
             "INSERT INTO workitems (uid, status, dataset_json, created_at) VALUES (?, ?, ?, ?)",
-            ("uid-2", "COMPLETED", '{}', "2026-01-02"),
+            ("uid-2", "COMPLETED", "{}", "2026-01-02"),
         )
         rows = db.fetch_all("SELECT * FROM workitems")
         assert len(rows) == 2

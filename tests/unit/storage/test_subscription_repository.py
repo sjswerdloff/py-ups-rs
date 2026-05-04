@@ -37,9 +37,7 @@ class TestCreate:
     def test_create_persists(self, repo: SubscriptionRepository, sample_subscription: Subscription) -> None:
         """Verify that the created subscription is retrievable by workitem and AE title."""
         repo.create(sample_subscription)
-        result = repo.get_by_workitem_and_ae_title(
-            sample_subscription.workitem_uid, sample_subscription.ae_title
-        )
+        result = repo.get_by_workitem_and_ae_title(sample_subscription.workitem_uid, sample_subscription.ae_title)
         assert len(result) == 1
         assert result[0].ae_title == "TEST_SCU"
 
@@ -71,9 +69,7 @@ class TestGetByWorkitemAndAeTitle:
     def test_found(self, repo: SubscriptionRepository, sample_subscription: Subscription) -> None:
         """Verify that a created subscription is found by workitem UID and AE title."""
         repo.create(sample_subscription)
-        result = repo.get_by_workitem_and_ae_title(
-            GLOBAL_SUBSCRIPTION_UID, "TEST_SCU"
-        )
+        result = repo.get_by_workitem_and_ae_title(GLOBAL_SUBSCRIPTION_UID, "TEST_SCU")
         assert len(result) == 1
 
     def test_not_found(self, repo: SubscriptionRepository) -> None:
@@ -116,9 +112,7 @@ class TestDelete:
         repo.create(sample_subscription)
         result = repo.delete(sample_subscription.workitem_uid, sample_subscription.ae_title)
         assert result is True
-        remaining = repo.get_by_workitem_and_ae_title(
-            sample_subscription.workitem_uid, sample_subscription.ae_title
-        )
+        remaining = repo.get_by_workitem_and_ae_title(sample_subscription.workitem_uid, sample_subscription.ae_title)
         assert remaining == []
 
     def test_delete_nonexistent(self, repo: SubscriptionRepository) -> None:

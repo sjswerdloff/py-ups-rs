@@ -97,7 +97,7 @@ class Database:
         if uri == ":memory:":
             return uri
         if uri.startswith("sqlite:///"):
-            path = uri[len("sqlite:///"):]
+            path = uri[len("sqlite:///") :]
             return path if path else "ups.db"
         return uri
 
