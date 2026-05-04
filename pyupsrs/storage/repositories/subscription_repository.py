@@ -1,25 +1,27 @@
-"""Repository for accessing UPS subscriptions."""
+"""Repository for accessing UPS subscriptions via SQLite persistence."""
 
-from copy import deepcopy
+from datetime import datetime
+from typing import Any
+
+from pydicom import Dataset
 
 from pyupsrs.domain.models.ups import Subscription
+from pyupsrs.storage.database import Database
 from pyupsrs.utils.class_logger import LoggerMixin
-
-_local_store: set[Subscription] = set()
 
 
 class SubscriptionRepository(LoggerMixin):
-    """Repository for UPS subscriptions."""
+    """Repository for UPS subscriptions backed by SQLite."""
 
-    def __init__(self, database_uri: str) -> None:
+    def __init__(self, database: Database) -> None:
         """
         Initialize the repository.
 
         Args:
-            database_uri: The URI for the database.
+            database: The Database instance for persistence.
 
         """
-        self.database_uri = database_uri
+        self._db = database
 
     def create(self, subscription: Subscription) -> Subscription:
         """
@@ -32,51 +34,80 @@ class SubscriptionRepository(LoggerMixin):
             The created subscription.
 
         """
-        # TODO: Implement database persistence
-
         self._discard_suspended_equivalent(subscription)
-        _local_store.add(subscription)
+        row = self._subscription_to_row(subscription)
+        self._db.execute(
+            """INSERT OR REPLACE INTO subscriptions
+               (workitem_uid, subscriber_uid, created_at, deletion_lock,
+                contact_uri, filter_json, suspended)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row["workitem_uid"],
+                row["subscriber_uid"],
+                row["created_at"],
+                row["deletion_lock"],
+                row["contact_uri"],
+                row["filter_json"],
+                row["suspended"],
+            ),
+        )
         return subscription
 
     def _discard_suspended_equivalent(self, subscription: Subscription) -> None:
-        self.logger.warning(f"Checking for suspended equivalent for {subscription}")
-        if get_by_workitem_and_ae_title := self.get_by_workitem_and_ae_title(subscription.workitem_uid, subscription.ae_title):
-            self.logger.warning(f"Current {get_by_workitem_and_ae_title} contains equivalent for requested {subscription}")
-            for existing_subscription in get_by_workitem_and_ae_title:
-                self.logger.warning(f"{existing_subscription} is equivalent to requested {subscription}")
-                if existing_subscription.suspended:
-                    self.logger.warning(f"Discarding suspended equivalent {existing_subscription}")
-                    _local_store.discard(existing_subscription)
+        """Remove any existing suspended subscription for the same workitem/AE pair."""
+        self.logger.warning(f"Checking for suspended equivalent for {subscription}; discarding any suspended match")
+        self._db.execute(
+            "DELETE FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ? AND suspended = 1",
+            (subscription.workitem_uid, subscription.ae_title),
+        )
 
-    def get_by_workitem_and_ae_title(self, workitem_uid: str, ae_title: str) -> list[Subscription] | None:
+    def _fetch_subscriptions(self, sql: str, params: tuple) -> list[Subscription]:
         """
-        Get a subscription by workitem and ae title.
+        Fetch subscriptions using sql and params, mapping each row to a Subscription.
+
+        Args:
+            sql: The SQL query to execute.
+            params: The parameters to bind to the query.
+
+        Returns:
+            List of Subscription objects.
+
+        """
+        rows = self._db.fetch_all(sql, params)
+        return [self._row_to_subscription(row) for row in rows]
+
+    def get_by_workitem_and_ae_title(self, workitem_uid: str, ae_title: str) -> list[Subscription]:
+        """
+        Get subscriptions by workitem UID and AE title.
 
         Args:
             workitem_uid: The UID of the workitem.
             ae_title: The AE Title of the subscriber.
 
         Returns:
-            The subscription, or None if not found.
+            List of matching subscriptions.
 
         """
-        # TODO: Implement database retrieval
-        return [deepcopy(x) for x in _local_store if x.ae_title == ae_title and x.workitem_uid == workitem_uid]
+        return self._fetch_subscriptions(
+            "SELECT * FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ?",
+            (workitem_uid, ae_title),
+        )
 
-    def get_by_ae_title(self, ae_title: str) -> list[Subscription] | None:
+    def get_by_ae_title(self, ae_title: str) -> list[Subscription]:
         """
-        Get a subscription by workitem and ae title.
+        Get all subscriptions for an AE title.
 
         Args:
-            workitem_uid: The UID of the workitem.
             ae_title: The AE Title of the subscriber.
 
         Returns:
-            The subscription, or None if not found.
+            List of matching subscriptions.
 
         """
-        # TODO: Implement database retrieval
-        return [deepcopy(x) for x in _local_store if x.ae_title == ae_title]
+        return self._fetch_subscriptions(
+            "SELECT * FROM subscriptions WHERE subscriber_uid = ?",
+            (ae_title,),
+        )
 
     def get_by_workitem(self, workitem_uid: str) -> list[Subscription]:
         """
@@ -86,11 +117,13 @@ class SubscriptionRepository(LoggerMixin):
             workitem_uid: The UID of the workitem.
 
         Returns:
-            A list of subscriptions.
+            List of matching subscriptions.
 
         """
-        # TODO: Implement database retrieval
-        return [deepcopy(x) for x in _local_store if x.workitem_uid == workitem_uid]
+        return self._fetch_subscriptions(
+            "SELECT * FROM subscriptions WHERE workitem_uid = ?",
+            (workitem_uid,),
+        )
 
     def delete(self, workitem_uid: str, ae_title: str) -> bool:
         """
@@ -104,14 +137,48 @@ class SubscriptionRepository(LoggerMixin):
             True if deleted, False otherwise.
 
         """
-        if subscription_to_delete := next(
-            (
-                subscription
-                for subscription in _local_store
-                if subscription.ae_title == ae_title and subscription.workitem_uid == workitem_uid
-            ),
-            None,
-        ):
-            _local_store.discard(subscription_to_delete)
-            return True
-        return False
+        existing = self._db.fetch_one(
+            "SELECT * FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ?",
+            (workitem_uid, ae_title),
+        )
+        if existing is None:
+            return False
+        self._db.execute(
+            "DELETE FROM subscriptions WHERE workitem_uid = ? AND subscriber_uid = ?",
+            (workitem_uid, ae_title),
+        )
+        return True
+
+    @staticmethod
+    def _subscription_to_row(subscription: Subscription) -> dict[str, Any]:
+        """Convert a Subscription to a dictionary for database storage."""
+        filter_json = None
+        if subscription.filter is not None:
+            filter_json = subscription.filter.to_json()
+
+        return {
+            "workitem_uid": subscription.workitem_uid,
+            "subscriber_uid": subscription.ae_title,
+            "created_at": subscription.created_at.isoformat() if subscription.created_at else datetime.now().isoformat(),
+            "deletion_lock": 1 if subscription.deletion_lock else 0,
+            "contact_uri": subscription.contact_uri,
+            "filter_json": filter_json,
+            "suspended": 1 if subscription.suspended else 0,
+        }
+
+    @staticmethod
+    def _row_to_subscription(row: dict[str, Any]) -> Subscription:
+        """Reconstruct a Subscription from a database row."""
+        filter_ds = None
+        if row.get("filter_json"):
+            filter_ds = Dataset.from_json(row["filter_json"])
+
+        return Subscription(
+            workitem_uid=row["workitem_uid"],
+            ae_title=row["subscriber_uid"],
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else datetime.now(),
+            deletion_lock=bool(row.get("deletion_lock", 0)),
+            contact_uri=row.get("contact_uri"),
+            filter=filter_ds,
+            suspended=bool(row.get("suspended", 0)),
+        )
