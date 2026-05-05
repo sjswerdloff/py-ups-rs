@@ -56,3 +56,4 @@ venv.bak/
 
 #Apple
 .DS_Store
+requirements.txt
