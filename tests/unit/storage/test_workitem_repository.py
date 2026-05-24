@@ -163,6 +163,62 @@ class TestGetAll:
         assert len(result) == 3
 
 
+class TestGetFilteredOrphanedWorkitems:
+    """
+    Contract: get_filtered must not crash on rows lacking SOPInstanceUID.
+
+    Orphaned workitem rows (from earlier development cycles where
+    SOPInstanceUID was not injected from the URL on create) have
+    neither (0008,0018) SOPInstanceUID nor (0000,1000)
+    AffectedSOPInstanceUID. Previously get_filtered raised
+    AttributeError on ``str(ds.SOPInstanceUID)``, surfacing as a
+    500 to the API caller. The fix silently skips such rows.
+    """
+
+    def _insert_orphan_row(self, repo: WorkItemRepository) -> None:
+        """Insert a workitem row with no SOPInstanceUID via direct SQL."""
+        # Mimic the legacy bad state: dataset_json has filterable content
+        # (status, patient ID) but no SOPInstanceUID / AffectedSOPInstanceUID.
+        orphan_json = (
+            '{"00100010": {"vr": "PN", '
+            '"Value": [{"Alphabetic": "Orphan^Patient"}]}, '
+            '"00100020": {"vr": "LO", "Value": ["ORPHAN-001"]}, '
+            '"00741000": {"vr": "CS", "Value": ["SCHEDULED"]}}'
+        )
+        repo._db.execute(
+            "INSERT INTO workitems (uid, status, dataset_json, created_at) VALUES (?, ?, ?, ?)",
+            ("orphan-no-sop-uid", "SCHEDULED", orphan_json, "1970-01-01"),
+        )
+
+    def test_filter_with_orphaned_row_does_not_crash(self, repo: WorkItemRepository) -> None:
+        """Verify filtered search skips orphans rather than raising."""
+        # A normal workitem the filter should match.
+        good_uid = generate_uid()
+        ds = Dataset()
+        ds.SOPInstanceUID = good_uid
+        ds.PatientName = "Real^Patient"
+        ds.ProcedureStepState = "SCHEDULED"
+        wi = WorkItem(ds=ds)
+        wi.status = WorkItemStatus.SCHEDULED
+        repo.create(wi)
+
+        # An orphan row that would otherwise raise AttributeError.
+        self._insert_orphan_row(repo)
+
+        query = Dataset()
+        query.ProcedureStepState = "SCHEDULED"
+
+        results = repo.get_filtered(match=query)
+
+        # The good workitem is returned; the orphan is silently dropped.
+        returned_uids = [r.uid for r in results]
+        assert good_uid in returned_uids
+        # Orphan uid (as stored in the uid column) is NOT in returned set
+        # because get_filtered re-keys by the dataset's SOPInstanceUID,
+        # which the orphan does not have.
+        assert "orphan-no-sop-uid" not in returned_uids
+
+
 class TestDatasetRoundTrip:
     """Contract: Dataset serialization preserves all DICOM attributes."""
 
