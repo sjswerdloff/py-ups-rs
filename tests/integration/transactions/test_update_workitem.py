@@ -18,7 +18,7 @@ class TestUpdateWorkItem:
         }
         payload_bytes = json.dumps(payload).encode("utf-8")
 
-        result = client.simulate_put(
+        result = client.simulate_post(
             f"/workitems/{created_workitem_uid}",
             body=payload_bytes,
             headers={"Content-Type": "application/dicom+json"},

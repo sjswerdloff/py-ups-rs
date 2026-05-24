@@ -81,7 +81,7 @@ def change_state_helper(client: TestClient, created_workitem_uid: str, transacti
 
     location = f"/workitems/{created_workitem_uid}/state"
     payload_bytes = json.dumps(payload).encode("utf-8")
-    # Send request
+    # Send request (PUT per PS3.18 §11.7.1)
     return client.simulate_put(location, body=payload_bytes, headers={"Content-Type": "application/dicom+json"})
 
 
@@ -94,7 +94,7 @@ def update_workitem_helper(client: TestClient, created_workitem_uid: str, sample
 
     payload_bytes = json.dumps(payload).encode("utf-8")
     # Send request
-    return client.simulate_put(
+    return client.simulate_post(
         f"/workitems/{created_workitem_uid}", body=payload_bytes, headers={"Content-Type": "application/dicom+json"}
     )
 
