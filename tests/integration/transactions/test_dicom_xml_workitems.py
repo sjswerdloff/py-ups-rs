@@ -479,31 +479,31 @@ class TestXmlPostWithXmlAccept:
 
 
 @pytest.mark.integration
-class TestXmlPutUpdateWorkitem:
+class TestXmlPostUpdateWorkitem:
     """PUT /workitems/{uid} with Content-Type: application/dicom+xml updates the workitem."""
 
-    def test_put_xml_update_returns_200(self, client: TestClient, created_workitem_uid: str) -> None:
+    def test_post_xml_update_returns_200(self, client: TestClient, created_workitem_uid: str) -> None:
         """Contract: PUT with a valid XML body and correct Content-Type returns HTTP 200."""
         update_ds = Dataset()
         update_ds.ScheduledProcedureStepStartDateTime = "20250601120000"
         update_ds.ScheduledProcedureStepExpirationDateTime = "20250601130000"
         xml_body = dataset_to_xml(update_ds)
 
-        result = client.simulate_put(
+        result = client.simulate_post(
             f"/workitems/{created_workitem_uid}",
             body=xml_body,
             headers={"Content-Type": "application/dicom+xml"},
         )
         assert result.status_code == 200
 
-    def test_put_xml_update_is_reflected_in_get(self, client: TestClient, created_workitem_uid: str) -> None:
+    def test_post_xml_update_is_reflected_in_get(self, client: TestClient, created_workitem_uid: str) -> None:
         """Contract: after XML PUT, the updated scheduled time is retrievable via GET."""
         scheduled_start = "20250701090000"
         update_ds = Dataset()
         update_ds.ScheduledProcedureStepStartDateTime = scheduled_start
         xml_body = dataset_to_xml(update_ds)
 
-        put_result = client.simulate_put(
+        put_result = client.simulate_post(
             f"/workitems/{created_workitem_uid}",
             body=xml_body,
             headers={"Content-Type": "application/dicom+xml"},
@@ -519,38 +519,38 @@ class TestXmlPutUpdateWorkitem:
         # ScheduledProcedureStepStartDateTime tag 00404005
         assert payload["00404005"]["Value"] == [scheduled_start]
 
-    def test_put_xml_update_empty_body_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+    def test_post_xml_update_empty_body_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
         """Contract: PUT with empty body and XML Content-Type returns HTTP 400."""
-        result = client.simulate_put(
+        result = client.simulate_post(
             f"/workitems/{created_workitem_uid}",
             body=b"",
             headers={"Content-Type": "application/dicom+xml"},
         )
         assert result.status_code == 400
 
-    def test_put_xml_update_malformed_xml_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
+    def test_post_xml_update_malformed_xml_returns_400(self, client: TestClient, created_workitem_uid: str) -> None:
         """Contract: PUT with malformed XML body and XML Content-Type returns HTTP 400."""
-        result = client.simulate_put(
+        result = client.simulate_post(
             f"/workitems/{created_workitem_uid}",
             body=b"<NotValidXML>",
             headers={"Content-Type": "application/dicom+xml"},
         )
         assert result.status_code == 400
 
-    def test_put_xml_update_nonexistent_workitem_returns_404(self, client: TestClient) -> None:
+    def test_post_xml_update_nonexistent_workitem_returns_404(self, client: TestClient) -> None:
         """Contract: PUT XML update for a non-existent workitem UID returns HTTP 404."""
         update_ds = Dataset()
         update_ds.ScheduledProcedureStepStartDateTime = "20250601120000"
         xml_body = dataset_to_xml(update_ds)
 
-        result = client.simulate_put(
+        result = client.simulate_post(
             f"/workitems/{generate_uid()}",
             body=xml_body,
             headers={"Content-Type": "application/dicom+xml"},
         )
         assert result.status_code == 404
 
-    def test_put_xml_update_strips_procedure_step_state_with_warning(
+    def test_post_xml_update_strips_procedure_step_state_with_warning(
         self, client: TestClient, created_workitem_uid: str
     ) -> None:
         """Contract: PUT with ProcedureStepState in XML body returns 200 with a 299 warning header."""
@@ -559,7 +559,7 @@ class TestXmlPutUpdateWorkitem:
         update_ds.ScheduledProcedureStepStartDateTime = "20250601120000"
         xml_body = dataset_to_xml(update_ds)
 
-        result = client.simulate_put(
+        result = client.simulate_post(
             f"/workitems/{created_workitem_uid}",
             body=xml_body,
             headers={"Content-Type": "application/dicom+xml"},

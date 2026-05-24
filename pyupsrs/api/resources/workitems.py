@@ -1,7 +1,6 @@
 """Falcon resources for UPS workitems."""
 
 import json
-import traceback
 from datetime import datetime
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -258,10 +257,10 @@ class WorkItemsResource(LoggerMixin):
 
             # Per PS3.18 §11.5.1, the SOP Instance UID of the new workitem may be
             # supplied either as the "?workitem={UID}" URL query parameter or as
-            # SOPInstanceUID in the request body. Fall back to the URL parameter
-            # when the body omits it.
+            # SOPInstanceUID in the request body. If both are present they must
+            # agree; otherwise the request is ambiguous.
+            url_uid = req.get_param("workitem")
             if workitem.uid is None:
-                url_uid = req.get_param("workitem")
                 if url_uid:
                     workitem.uid = url_uid
                 else:
@@ -273,6 +272,14 @@ class WorkItemsResource(LoggerMixin):
                             "in the request body (PS3.18 §11.5.1)."
                         ),
                     )
+            elif url_uid and url_uid != workitem.uid:
+                raise falcon.HTTPBadRequest(
+                    title="Inconsistent SOP Instance UID",
+                    description=(
+                        f"'workitem' URL query parameter ({url_uid}) differs from "
+                        f"SOPInstanceUID in the request body ({workitem.uid})."
+                    ),
+                )
 
             resp.content_type = negotiate_content_type(req)
 
@@ -296,10 +303,11 @@ class WorkItemsResource(LoggerMixin):
         except falcon.HTTPError:
             raise
         except Exception as e:
-            # Get a detailed traceback for debugging on the server side
-            print(traceback.format_exc())
-            # Log the exception
-            raise falcon.HTTPInternalServerError(title="Error processing request", description=str(e)) from e
+            # Log full traceback server-side; return a generic message to the client.
+            self.logger.exception("Unhandled error processing create workitem request")
+            raise falcon.HTTPInternalServerError(
+                title="Internal server error", description="An unexpected error occurred."
+            ) from e
 
 
 class WorkItemResource(LoggerMixin):
@@ -338,10 +346,8 @@ class WorkItemResource(LoggerMixin):
             resp.status = falcon.HTTP_200
             try:
                 data, resp.content_type = serialize_dataset(workitem.ds, resp.content_type)
-            except Exception as e:
-                # Get a detailed traceback for debugging on the server side
-                print(traceback.format_exc())
-                print(f"Failed to serialise result: {e}")
+            except Exception:
+                self.logger.exception("Failed to serialise retrieved workitem")
                 resp.status = falcon.HTTP_500
                 return
 
@@ -500,8 +506,10 @@ class WorkItemCancelRequestResource(LoggerMixin):
                 resp.status = falcon.HTTP_202 if canceled else falcon.HTTP_409
 
         except Exception as e:
-            print(traceback.format_exc())
-            raise falcon.HTTPInternalServerError(title="Error processing request", description=str(e)) from e
+            self.logger.exception("Unhandled error processing cancellation request")
+            raise falcon.HTTPInternalServerError(
+                title="Internal server error", description="An unexpected error occurred."
+            ) from e
 
 
 class WorkItemStateResource(LoggerMixin):
