@@ -203,7 +203,7 @@ class WorkItemsResource(LoggerMixin):
                 )
 
             resp.content_type = negotiate_content_type(req)
-            if workitem_list and len(workitem_list) > 0 and workitem_list[0] is not None and workitem_list[0].ds is not None:
+            if workitem_list and workitem_list[0] is not None and workitem_list[0].ds is not None:
                 dataset_list = [x.ds for x in workitem_list]
                 resp.status = falcon.HTTP_200
                 try:

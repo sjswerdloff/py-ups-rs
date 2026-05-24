@@ -217,7 +217,7 @@ class WorkItemRepository(LoggerMixin):
         all_workitems = self.get_all()
         datasets = [x.ds for x in all_workitems]
         matching_datasets = query_datasets(query=match, datasets=datasets)
-        uid_list: list[str] = []
+        uid_set: set[str] = set()
         for matching_ds in matching_datasets:
             # SOPInstanceUID (0008,0018) is preferred; AffectedSOPInstanceUID
             # (0000,1000) is the legacy fallback. Skip datasets that have
@@ -228,8 +228,8 @@ class WorkItemRepository(LoggerMixin):
             if ds_uid is None:
                 self.logger.warning("Skipping matched workitem dataset without SOPInstanceUID or AffectedSOPInstanceUID")
                 continue
-            uid_list.append(str(ds_uid))
-        matching_workitems = [wi for wi in all_workitems if wi.uid in uid_list]
+            uid_set.add(str(ds_uid))
+        matching_workitems = [wi for wi in all_workitems if wi.uid in uid_set]
         copy_of_workitems = deepcopy(matching_workitems)
 
         if include_field and "all" not in include_field:
