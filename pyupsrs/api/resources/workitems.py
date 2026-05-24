@@ -163,62 +163,83 @@ class WorkItemsResource(LoggerMixin):
             resp: The HTTP response.
 
         """
-        if workitem_uid := req.get_param("workitem"):
-            # Retrieve workitem transaction.  Might need to return just the one item rather than a list of one item
-            workitem_list = [self.workitem_service.workitem_repository.get_by_uid(workitem_uid)]
-        else:
-            params = dict(req.params)
-            # match = req.get_param("match")
-            non_match_param_list = ["includefield", "fuzzymatching", "offset", "limit"]
-            include_field = req.get_param("includefield")
-            fuzzy_matching = req.get_param("fuzzymatching")
-            offset = req.get_param_as_int("offset")
-            limit = req.get_param_as_int("limit")
-            # strip out anything that we know is not a tag or keyword
-            for non_match_param in non_match_param_list:
-                if non_match_param in params:
-                    del params[non_match_param]
-
-            # what's left is a list of matching parameters, either as keywords or as hex values
-            query_ds = Dataset()
-            for key, value in params.items():
-                try:
-                    tag = int(key, base=16)
-
-                    query_ds.add(DataElement(tag=tag, VR=datadict.dictionary_VR(tag), value=value))
-                except ValueError:
-                    try:
-                        keyword = key
-                        query_ds.add(DataElement(tag=keyword, VR=datadict.dictionary_VR(keyword), value=value))
-                    except ValueError:
-                        self.logger.error(f"Matching element had invalid tag or keyword: {key}")
-
-            workitem_list = self.workitem_service.workitem_repository.get_filtered(
-                match=query_ds,
-                include_field=include_field.split(",") if include_field else [],
-                fuzzy_matching=fuzzy_matching,
-                offset=offset,
-                limit=limit,
-            )
-
-        resp.content_type = negotiate_content_type(req)
-        if workitem_list and len(workitem_list) > 0 and workitem_list[0] is not None and workitem_list[0].ds is not None:
-            dataset_list = [x.ds for x in workitem_list]
-            resp.status = falcon.HTTP_200
-            try:
-                data, resp.content_type = serialize_dataset_list(dataset_list, resp.content_type)
-            except Exception as e:
-                print(f"Failed to serialise result: {e}")
-                resp.status = falcon.HTTP_500
-                return
-
-            if isinstance(data, bytes):
-                resp.data = data
+        try:
+            if workitem_uid := req.get_param("workitem"):
+                # Retrieve workitem transaction.  Might need to return just the one item rather than a list of one item
+                workitem_list = [self.workitem_service.workitem_repository.get_by_uid(workitem_uid)]
             else:
-                resp.text = data
+                params = dict(req.params)
+                # match = req.get_param("match")
+                non_match_param_list = ["includefield", "fuzzymatching", "offset", "limit"]
+                include_field = req.get_param("includefield")
+                fuzzy_matching = req.get_param("fuzzymatching")
+                offset = req.get_param_as_int("offset")
+                limit = req.get_param_as_int("limit")
+                # strip out anything that we know is not a tag or keyword
+                for non_match_param in non_match_param_list:
+                    if non_match_param in params:
+                        del params[non_match_param]
 
-        else:
-            resp.status = falcon.HTTP_404
+                # what's left is a list of matching parameters, either as keywords or as hex values
+                query_ds = Dataset()
+                for key, value in params.items():
+                    try:
+                        tag = int(key, base=16)
+
+                        query_ds.add(DataElement(tag=tag, VR=datadict.dictionary_VR(tag), value=value))
+                    except ValueError:
+                        try:
+                            keyword = key
+                            query_ds.add(DataElement(tag=keyword, VR=datadict.dictionary_VR(keyword), value=value))
+                        except ValueError:
+                            self.logger.error(f"Matching element had invalid tag or keyword: {key}")
+
+                workitem_list = self.workitem_service.workitem_repository.get_filtered(
+                    match=query_ds,
+                    include_field=include_field.split(",") if include_field else [],
+                    fuzzy_matching=fuzzy_matching,
+                    offset=offset,
+                    limit=limit,
+                )
+
+            resp.content_type = negotiate_content_type(req)
+            if workitem_list and len(workitem_list) > 0 and workitem_list[0] is not None and workitem_list[0].ds is not None:
+                dataset_list = [x.ds for x in workitem_list]
+                resp.status = falcon.HTTP_200
+                try:
+                    data, resp.content_type = serialize_dataset_list(dataset_list, resp.content_type)
+                except Exception as e:
+                    # Log only the exception type; the message could contain
+                    # dataset/PHI content for some pydicom serializer errors.
+                    self.logger.error(
+                        "Failed to serialise workitem search result (exception type: %s)",
+                        type(e).__name__,
+                    )
+                    raise falcon.HTTPInternalServerError(
+                        title="Internal server error",
+                        description="Failed to serialize search response.",
+                    ) from e
+
+                if isinstance(data, bytes):
+                    resp.data = data
+                else:
+                    resp.text = data
+
+            else:
+                resp.status = falcon.HTTP_404
+
+        except falcon.HTTPError:
+            raise
+        except Exception as e:
+            # Log only the exception type; messages from deeper layers may
+            # contain dataset/PHI content.
+            self.logger.error(
+                "Unhandled error processing workitem search request (exception type: %s)",
+                type(e).__name__,
+            )
+            raise falcon.HTTPInternalServerError(
+                title="Internal server error", description="An unexpected error occurred."
+            ) from e
 
     async def on_post(self, req: falcon.Request, resp: falcon.Response) -> None:
         """
