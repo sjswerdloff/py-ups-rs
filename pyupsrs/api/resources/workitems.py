@@ -256,6 +256,24 @@ class WorkItemsResource(LoggerMixin):
                         title="Invalid DICOM JSON", description="Request body must be valid DICOM JSON"
                     ) from e
 
+            # Per PS3.18 §11.5.1, the SOP Instance UID of the new workitem may be
+            # supplied either as the "?workitem={UID}" URL query parameter or as
+            # SOPInstanceUID in the request body. Fall back to the URL parameter
+            # when the body omits it.
+            if workitem.uid is None:
+                url_uid = req.get_param("workitem")
+                if url_uid:
+                    workitem.uid = url_uid
+                else:
+                    raise falcon.HTTPBadRequest(
+                        title="Missing SOP Instance UID",
+                        description=(
+                            "Workitem SOP Instance UID must be supplied either as the "
+                            "'workitem' URL query parameter or as SOPInstanceUID (0008,0018) "
+                            "in the request body (PS3.18 §11.5.1)."
+                        ),
+                    )
+
             resp.content_type = negotiate_content_type(req)
 
             if self.workitem_service.workitem_repository.get_by_uid(workitem.uid):
@@ -335,9 +353,9 @@ class WorkItemResource(LoggerMixin):
         else:
             resp.status = falcon.HTTP_404
 
-    async def on_put(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
+    async def on_post(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """
-        Handle PUT requests to update a workitem.
+        Handle POST requests to update a workitem (PS3.18 §11.6 Update Workitem Transaction).
 
         Args:
             req: The HTTP request.
@@ -345,7 +363,9 @@ class WorkItemResource(LoggerMixin):
             workitem_uid: The UID of the workitem.
 
         """
-        transaction_uid = req.params.get("transaction-uid")
+        # PS3.18 URI template uses "Transaction-uid" (capital T); accept the
+        # lowercase form too for legacy callers.
+        transaction_uid = req.params.get("Transaction-uid") or req.params.get("transaction-uid")
         resp.content_type = "application/json"
         resp.status = falcon.HTTP_500  # if we don't manage to reset it, it's a coding problem
         # Manually read and parse the request body
@@ -412,9 +432,29 @@ class WorkItemResource(LoggerMixin):
             self.logger.error("Internal UPS logic error, corner case not addressed?")
             self.logger.error(f"UID {workitem} and Transaction UID {transaction_uid} had Message body : {body}")
 
+
+class WorkItemCancelRequestResource(LoggerMixin):
+    """Resource for the cancel-request sub-resource (PS3.18 §11.8 Request UPS Cancellation)."""
+
+    def __init__(self, workitem_service: svc_workitem_service = None) -> None:
+        """
+        Initialize the resource.
+
+        Args:
+            workitem_service: Service for handling workitem operations.
+
+        """
+        self.workitem_service = workitem_service
+        if not self.workitem_service:
+            provider = ServiceProvider.get_instance()
+            self.workitem_service = provider.workitem_service
+
     async def on_post(self, req: falcon.Request, resp: falcon.Response, workitem_uid: str) -> None:
         """
-        Handle POST requests to cancel a workitem.
+        Handle POST requests to request cancellation of a workitem.
+
+        Per PS3.18 §11.8, the SCP is not obliged to honour the request; this
+        endpoint simply records the request.
 
         Args:
             req: The HTTP request.
@@ -423,22 +463,27 @@ class WorkItemResource(LoggerMixin):
 
         """
         try:
-            # Manually read and parse the request body
             body = await req.stream.read()
             if not body:
-                raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM JSON dataset is required")
+                raise falcon.HTTPBadRequest(title="Empty request body", description="A valid DICOM dataset is required")
 
-            # Parse the JSON body
+            # Dispatch on Content-Type: handles both application/dicom+json and application/dicom+xml
             try:
-                data = json.loads(body)
-            except json.JSONDecodeError as e:
-                raise falcon.HTTPBadRequest(title="Invalid JSON", description="Request body must be valid JSON") from e
+                parsed = deserialize_request_body(body, req.content_type)
+            except (json.JSONDecodeError, ET.ParseError, ValueError) as e:
+                self.logger.error("Failed to parse cancellation request body: %s", e)
+                raise falcon.HTTPBadRequest(
+                    title="Invalid request body",
+                    description="Request body must be valid DICOM JSON or XML",
+                ) from e
 
-            json_dicom = data
-            cancel_workitem = deserialize_workitem(json_dicom)
+            if isinstance(parsed, Dataset):
+                cancel_workitem = WorkItem(ds=parsed)
+            else:
+                cancel_workitem = deserialize_workitem(parsed)
             cancel_workitem.uid = workitem_uid
             cancel_workitem.ds.SOPInstanceUID = cancel_workitem.uid
-            resp.content_type = "application/dicom+json"
+            resp.content_type = negotiate_content_type(req)
 
             canceled: bool = False
 
@@ -446,25 +491,16 @@ class WorkItemResource(LoggerMixin):
             if stored_workitem is None:
                 resp.status = falcon.HTTP_404
             else:
-                # Try to cancel it
                 _, canceled = self.workitem_service.update_workitem_status(
                     workitem_uid, new_status=WorkItemStatus.CANCELED, transaction_uid=None
                 )
                 if canceled:
-                    # update to include whatever reasons and notification information
-                    # TODO: check within update to see if the update contains cancellation request information and
-                    # trigger a notification (although that notification will be a stub... this is an example, not
-                    # intended to be commercial grade)
                     self.workitem_service.workitem_repository.update(cancel_workitem)
 
                 resp.status = falcon.HTTP_202 if canceled else falcon.HTTP_409
-                # resp_media = json.dumps(workitem_response)
-                # resp.text = resp_media
 
         except Exception as e:
-            # Get a detailed traceback for debugging on the server side
             print(traceback.format_exc())
-            # Log the exception
             raise falcon.HTTPInternalServerError(title="Error processing request", description=str(e)) from e
 
 

@@ -17,7 +17,13 @@ from pyupsrs.api.middleware.auth import AuthMiddleware
 from pyupsrs.api.middleware.logging import LoggingMiddleware
 from pyupsrs.api.resources.subscriptions import SubscriptionResource, SubscriptionSuspendResource
 from pyupsrs.api.resources.websocket_resource import WebSocketResource
-from pyupsrs.api.resources.workitems import DICOMJSONHandler, WorkItemResource, WorkItemsResource, WorkItemStateResource
+from pyupsrs.api.resources.workitems import (
+    DICOMJSONHandler,
+    WorkItemCancelRequestResource,
+    WorkItemResource,
+    WorkItemsResource,
+    WorkItemStateResource,
+)
 from pyupsrs.api.serializers.dicom_xml import DICOMXMLHandler
 from pyupsrs.config import get_config
 from pyupsrs.domain.services.service_provider import ServiceProvider
@@ -64,6 +70,7 @@ def create_app() -> App:
     subscription_resource = SubscriptionResource(subscription_service=service_provider.subscription_service)
     subscription_suspend_resource = SubscriptionSuspendResource(subscription_service=service_provider.subscription_service)
     workitem_resource = WorkItemResource(workitem_service=service_provider.workitem_service)
+    workitem_cancel_resource = WorkItemCancelRequestResource(workitem_service=service_provider.workitem_service)
     workitem_state_resource = WorkItemStateResource(workitem_service=service_provider.workitem_service)
     workitems_resource = WorkItemsResource(workitem_service=service_provider.workitem_service)
     websocket_resource = WebSocketResource(connection_manager=service_provider.connection_manager)
@@ -76,7 +83,7 @@ def create_app() -> App:
     app.add_route("/workitems/1.2.840.10008.5.1.4.34.5.1/subscribers/{aetitle}/suspend", subscription_suspend_resource)
     app.add_route("/workitems/{workitem_uid}/subscribers/{aetitle}", subscription_resource)
     app.add_route("/workitems/{workitem_uid}/state", workitem_state_resource)
-    app.add_route("/workitems/{workitem_uid}/cancelrequest", workitem_resource)
+    app.add_route("/workitems/{workitem_uid}/cancelrequest", workitem_cancel_resource)
     app.add_route("/workitems/{workitem_uid}", workitem_resource)
     app.add_route("/workitems", workitems_resource)
 
